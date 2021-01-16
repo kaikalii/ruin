@@ -1,0 +1,9 @@
+
+[package]
+authors = ['Kai Schmidt <kaikaliischmidt@gmail.com>']
+edition = '2018'
+name = 'ruin'
+version = '0.1.0'
+
+[dependencies]
+tokenate.path = '../tokenate'
