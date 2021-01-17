@@ -9,6 +9,7 @@ pub enum Token {
     Ident(String),
     Num(Num),
     Bool(bool),
+    String(String),
     Nil,
     Equals,
     Plus,
@@ -29,6 +30,7 @@ impl Display for Token {
             Token::Ident(ident) => ident.fmt(f),
             Token::Num(num) => num.fmt(f),
             Token::Bool(b) => b.fmt(f),
+            Token::String(s) => write!(f, "{:?}", s),
             Token::Nil => "nil".fmt(f),
             Token::Equals => '='.fmt(f),
             Token::Plus => '+'.fmt(f),
@@ -63,6 +65,31 @@ fn ident_pattern() -> impl Pattern<Token = Token> {
     pattern::ident(ident_head, ident_body).map(Token::Ident)
 }
 
+fn string_literal(chars: &mut Chars) -> TokenResult<String> {
+    Ok(if chars.take_if(|c| c == '"')?.is_some() {
+        let mut arg = String::new();
+        let mut escaped = false;
+        while let Some(c) = chars.take()? {
+            match c {
+                '\\' if escaped.take() => arg.push('\\'),
+                '\\' => escaped = true,
+                '"' if escaped.take() => arg.push('"'),
+                '"' => break,
+                'n' if escaped.take() => arg.push('\n'),
+                'r' if escaped.take() => arg.push('\r'),
+                't' if escaped.take() => arg.push('\t'),
+                c if escaped => {
+                    return Err(LexError::Custom(format!("Invalid escape char: {:?}", c)))
+                }
+                c => arg.push(c),
+            }
+        }
+        Some(arg)
+    } else {
+        None
+    })
+}
+
 fn command_pattern() -> impl Pattern<Token = Token> {
     ("<=".is(Token::Cmp(OpCmp::LessOrEqual)))
         .or(">=".is(Token::Cmp(OpCmp::GreaterOrEqual)))
@@ -80,6 +107,8 @@ fn command_pattern() -> impl Pattern<Token = Token> {
         .or("or".is(Token::Or))
         // Num
         .or(num_pattern())
+        // String
+        .or(string_literal.map(Token::String))
         // Simple literals
         .or("nil".is(Token::Nil))
         .or("true".is(Token::Bool(true)))

@@ -136,6 +136,15 @@ impl Tokens {
             }
         }))
     }
+    pub fn string_literal(&mut self) -> MaybeParse<String> {
+        Ok(self.take_as(|token| {
+            if let Token::String(s) = token {
+                Ok(s)
+            } else {
+                Err(token)
+            }
+        }))
+    }
     pub fn num(&mut self) -> MaybeParse<Num> {
         Ok(self.take_as(|token| {
             if let Token::Num(num) = token {
@@ -274,6 +283,8 @@ impl Tokens {
             num.map(Term::Num)
         } else if let Some(b) = self.ident()? {
             b.map(Term::Ident)
+        } else if let Some(s) = self.string_literal()? {
+            s.map(Term::String)
         } else if let Some(ident) = self.boolean()? {
             ident.map(Term::Bool)
         } else if let Some(nil) = self.matching(Token::Nil) {
@@ -399,6 +410,8 @@ pub enum Term {
     Ident(String),
     #[display(fmt = "{}", "_0.to_string().blue()")]
     Bool(bool),
+    #[display(fmt = "{}", "format!(\"{:?}\", _0).green()")]
+    String(String),
     #[display(fmt = "{}", "\"nil\".blue()")]
     Nil,
 }

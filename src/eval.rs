@@ -135,6 +135,7 @@ impl Term {
             Term::Num(n) => Value::Num(*n),
             Term::Nil => Value::Nil,
             Term::Ident(ident) => eval_rec(ident, cb, visited)?,
+            Term::String(s) => Value::String(s.clone()),
         })
     }
 }

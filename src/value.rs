@@ -37,6 +37,8 @@ pub enum Value {
     Num(Num),
     #[display(fmt = "{}", "_0.to_string().blue()")]
     Bool(bool),
+    #[display(fmt = "{}", "_0.to_string().green()")]
+    String(String),
     List(List),
     Table(Table),
 }
@@ -47,6 +49,7 @@ impl Value {
             Value::Nil => Type::Nil,
             Value::Num(_) => Type::Number,
             Value::Bool(_) => Type::Bool,
+            Value::String(_) => Type::String,
             Value::List(_) => Type::List,
             Value::Table(_) => Type::Table,
         }
