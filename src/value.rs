@@ -31,7 +31,7 @@ pub enum Type {
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Value {
-    #[display(fmt = "{}" "\"nil\".blue()")]
+    #[display(fmt = "{}", "\"nil\".blue()")]
     Nil,
     #[display(fmt = "{}", "_0.to_string().blue()")]
     Num(Num),

@@ -11,8 +11,16 @@ pub struct Evald {
 impl Evald {
     pub fn format(&self) -> String {
         match &self.res {
-            Some(Ok(_)) if self.expr.terms() == 1 => format!("{}", self.expr),
-            Some(Ok(val)) => format!("{} = {}", self.expr, val),
+            Some(Ok(val)) => {
+                let val = val.to_string();
+                let expr = self.expr.to_string();
+                if val == expr {
+                    val
+                } else {
+                    format!("{} = {}", self.expr, val)
+                }
+            }
+            Some(Err(EvalError::UnknownType)) => format!("{}", self.expr),
             Some(Err(e)) => format!("{} = {}", self.expr, e.to_string().red()),
             None => format!("{}", self.expr),
         }
@@ -27,11 +35,7 @@ pub struct Codebase {
 impl Codebase {
     pub fn assign(&mut self, ass: Assignment) {
         // Unassign results that depend on the ident
-        for evald in self.vals.values_mut() {
-            if evald.expr.contains_ident(&ass.ident) {
-                evald.res = None;
-            }
-        }
+        self.unassign_results(&ass.ident);
         // Insert
         self.vals.remove(&ass.ident);
         self.vals.insert(
@@ -57,6 +61,19 @@ impl Codebase {
             .values()
             .filter(|val| val.res.as_ref().map_or(false, |res| res.is_ok()))
             .count()
+    }
+    pub fn unassign_results(&mut self, ident: &str) {
+        let mut idents = vec![ident.to_owned()];
+        while !idents.is_empty() {
+            for ident in idents.drain(..).collect::<Vec<_>>() {
+                for (id, evald) in &mut self.vals {
+                    if evald.expr.contains_ident(&ident) {
+                        evald.res = None;
+                        idents.push(id.clone());
+                    }
+                }
+            }
+        }
     }
     pub fn eval_all(&mut self) {
         // Get initial count and idents
