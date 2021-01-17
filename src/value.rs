@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use colored::Colorize;
 use derive_more::Display;
 use rpds::{RedBlackTreeMap, Vector};
 
@@ -30,9 +31,11 @@ pub enum Type {
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Value {
-    #[display(fmt = "nil")]
+    #[display(fmt = "{}" "\"nil\".blue()")]
     Nil,
+    #[display(fmt = "{}", "_0.to_string().blue()")]
     Num(Num),
+    #[display(fmt = "{}", "_0.to_string().blue()")]
     Bool(bool),
     List(List),
     Table(Table),

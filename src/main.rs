@@ -7,6 +7,8 @@ mod value;
 
 use std::io::{stdin, stdout, BufRead, Write};
 
+use colored::Colorize;
+
 use codebase::Codebase;
 use parse::{parse, Command};
 
@@ -29,6 +31,6 @@ fn main() {
 }
 
 fn print_prompt() {
-    print!("\r> ");
+    print!("{}", "\r> ".bright_yellow());
     let _ = stdout().flush();
 }

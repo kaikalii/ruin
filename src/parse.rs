@@ -1,5 +1,6 @@
 use std::fmt::Display as StdDisplay;
 
+use colored::Colorize;
 use derive_more::Display;
 use tokenate::{LexError, Sp};
 
@@ -284,7 +285,7 @@ impl Tokens {
 }
 
 #[derive(Debug, Display)]
-#[display(fmt = "{} = {}", ident, expr)]
+#[display(fmt = "{} = {}", "ident.bright_white()", expr)]
 pub struct Assignment {
     pub ident: String,
     pub expr: Expression,
@@ -392,10 +393,13 @@ pub type ExprMDR = BinExpr<Term, OpMDR>;
 pub enum Term {
     #[display(fmt = "({})", _0)]
     Expr(Box<Expression>),
+    #[display(fmt = "{}", "_0.to_string().blue()")]
     Num(Num),
+    #[display(fmt = "{}", "_0.bright_white()")]
     Ident(String),
+    #[display(fmt = "{}", "_0.to_string().blue()")]
     Bool(bool),
-    #[display(fmt = "nil")]
+    #[display(fmt = "{}", "\"nil\".blue()")]
     Nil,
 }
 

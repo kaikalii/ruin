@@ -1,3 +1,4 @@
+use colored::Colorize;
 use indexmap::IndexMap;
 
 use crate::{eval::*, parse::*, value::Value};
@@ -12,7 +13,7 @@ impl Evald {
         match &self.res {
             Some(Ok(_)) if self.expr.terms() == 1 => format!("{}", self.expr),
             Some(Ok(val)) => format!("{} = {}", self.expr, val),
-            Some(Err(e)) => format!("{} = {}", self.expr, e),
+            Some(Err(e)) => format!("{} = {}", self.expr, e.to_string().red()),
             None => format!("{}", self.expr),
         }
     }
@@ -47,7 +48,7 @@ impl Codebase {
             println!("...");
         }
         for (ident, evald) in self.vals.iter().rev().take(n).rev() {
-            println!("{} = {}", ident, evald.format())
+            println!("{} = {}", ident.to_string().bold(), evald.format())
         }
         println!();
     }
