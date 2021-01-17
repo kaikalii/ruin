@@ -3,11 +3,10 @@ use std::fmt::Display as StdDisplay;
 use derive_more::Display;
 use tokenate::{LexError, Sp};
 
-use crate::{lexer::*, num::Num, types::Type};
+use crate::{lexer::*, num::Num};
 
 #[derive(Debug, Display)]
 pub enum ParseError {
-    #[display(fmt = "{}", _0)]
     Lex(LexError),
     #[display(fmt = "Expected {}", _0)]
     Expected(String),
@@ -261,6 +260,31 @@ pub struct BinExpr<T, O> {
     pub right: Option<Right<T, O>>,
 }
 
+pub trait Node {
+    fn contains_ident(&self, ident: &str) -> bool;
+    fn terms(&self) -> usize;
+}
+
+impl<T, O> Node for BinExpr<T, O>
+where
+    T: Node,
+{
+    fn contains_ident(&self, ident: &str) -> bool {
+        self.left.data.contains_ident(ident)
+            || self
+                .right
+                .as_ref()
+                .map_or(false, |right| right.expr.data.contains_ident(ident))
+    }
+    fn terms(&self) -> usize {
+        self.left.data.terms()
+            + self
+                .right
+                .as_ref()
+                .map_or(0, |right| right.expr.data.terms())
+    }
+}
+
 #[derive(Debug)]
 pub struct Right<T, O> {
     pub op: Sp<O>,
@@ -280,7 +304,7 @@ pub struct OpOr;
 #[display(fmt = "and")]
 pub struct OpAnd;
 
-#[derive(Debug, Display)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
 pub enum OpAS {
     #[display(fmt = "+")]
     Add,
@@ -288,7 +312,7 @@ pub enum OpAS {
     Sub,
 }
 
-#[derive(Debug, Display)]
+#[derive(Debug, Display, Clone, Copy)]
 pub enum OpMDR {
     #[display(fmt = "*")]
     Mul,
@@ -308,24 +332,26 @@ pub type ExprMDR = BinExpr<Term, OpMDR>;
 pub enum Term {
     #[display(fmt = "({})", _0)]
     Expr(Box<Expression>),
-    #[display(fmt = "{}", _0)]
     Num(Num),
-    #[display(fmt = "{}", _0)]
     Ident(String),
-    #[display(fmt = "{}", _0)]
     Bool(bool),
     #[display(fmt = "nil")]
     Nil,
 }
 
-impl Term {
-    pub fn ty(&self) -> Type {
+impl Node for Term {
+    fn contains_ident(&self, ident: &str) -> bool {
         match self {
-            Term::Expr(expr) => todo!(),
-            Term::Num(_) => Type::Number,
-            Term::Ident(_) => todo!(),
-            Term::Bool(_) => Type::Bool,
-            Term::Nil => Type::Nil,
+            Term::Expr(expr) => expr.contains_ident(ident),
+            Term::Ident(i) => i == ident,
+            _ => false,
+        }
+    }
+    fn terms(&self) -> usize {
+        if let Term::Expr(expr) = self {
+            expr.terms()
+        } else {
+            1
         }
     }
 }

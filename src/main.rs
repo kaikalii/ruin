@@ -1,8 +1,8 @@
 mod codebase;
+mod eval;
 mod lexer;
 mod num;
 mod parse;
-mod types;
 mod value;
 
 use std::io::{stdin, stdout, BufRead, Write};
@@ -18,6 +18,7 @@ fn main() {
             Ok(command) => match command {
                 Command::Assignment(ass) => {
                     cb.assign(ass);
+                    cb.eval_all();
                     cb.print(10);
                 }
             },
