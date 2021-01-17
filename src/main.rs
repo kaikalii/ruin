@@ -1,19 +1,17 @@
 mod lexer;
 mod num;
+mod parse;
 
 use std::io::{stdin, stdout, BufRead, Write};
 
-use lexer::lex;
+use parse::parse;
 
 fn main() {
     print_prompt();
     for input in stdin().lock().lines().filter_map(Result::ok) {
-        match lex(&input) {
-            Ok(tokens) => {
-                for token in tokens {
-                    println!("{:?}", token.data);
-                }
-                println!();
+        match parse(&input) {
+            Ok(command) => {
+                println!("{}\n", command);
             }
             Err(e) => println!("Error: {}\n", e),
         }

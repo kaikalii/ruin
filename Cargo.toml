@@ -6,4 +6,5 @@ name = 'ruin'
 version = '0.1.0'
 
 [dependencies]
+derive_more = '0.99.11'
 tokenate.path = '../tokenate'
