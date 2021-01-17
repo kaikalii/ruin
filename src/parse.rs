@@ -153,6 +153,15 @@ impl Tokens {
             }
         }))
     }
+    pub fn cmp(&mut self) -> MaybeParse<OpCmp> {
+        Ok(self.take_as(|token| {
+            if let Token::Cmp(cmp) = token {
+                Ok(cmp)
+            } else {
+                Err(token)
+            }
+        }))
+    }
     pub fn assigment(&mut self) -> MaybeParse<Assignment> {
         let ident = if let Some(ident) = self.ident()? {
             ident
@@ -181,10 +190,10 @@ impl Tokens {
         Ok(span.sp(ExprOr { left, right }))
     }
     pub fn expr_and(&mut self) -> Parse<ExprAnd> {
-        let left = self.expr_as()?;
+        let left = self.expr_cmp()?;
         let right = self
             .matches_as(Token::And, OpAnd)
-            .map(|op| self.expr_as().map(|expr| Right::new(op, expr)))
+            .map(|op| self.expr_cmp().map(|expr| Right::new(op, expr)))
             .transpose()?;
         let span = if let Some(right) = &right {
             left.span | right.op.span
@@ -192,6 +201,19 @@ impl Tokens {
             left.span
         };
         Ok(span.sp(ExprAnd { left, right }))
+    }
+    pub fn expr_cmp(&mut self) -> Parse<ExprCmp> {
+        let left = self.expr_as()?;
+        let right = self
+            .cmp()?
+            .map(|op| self.expr_as().map(|expr| Right::new(op, expr)))
+            .transpose()?;
+        let span = if let Some(right) = &right {
+            left.span | right.op.span
+        } else {
+            left.span
+        };
+        Ok(span.sp(ExprCmp { left, right }))
     }
     pub fn expr_as(&mut self) -> Parse<ExprAS> {
         let left = self.expr_mdr()?;
@@ -305,6 +327,22 @@ pub struct OpOr;
 pub struct OpAnd;
 
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
+pub enum OpCmp {
+    #[display(fmt = "is")]
+    Is,
+    #[display(fmt = "isnt")]
+    Isnt,
+    #[display(fmt = "<")]
+    Less,
+    #[display(fmt = ">")]
+    Greater,
+    #[display(fmt = "<=")]
+    LessOrEqual,
+    #[display(fmt = ">=")]
+    GreaterOrEqual,
+}
+
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
 pub enum OpAS {
     #[display(fmt = "+")]
     Add,
@@ -324,7 +362,8 @@ pub enum OpMDR {
 
 pub type Expression = ExprOr;
 pub type ExprOr = BinExpr<ExprAnd, OpOr>;
-pub type ExprAnd = BinExpr<ExprAS, OpAnd>;
+pub type ExprAnd = BinExpr<ExprCmp, OpAnd>;
+pub type ExprCmp = BinExpr<ExprAS, OpCmp>;
 pub type ExprAS = BinExpr<ExprMDR, OpAS>;
 pub type ExprMDR = BinExpr<Term, OpMDR>;
 

@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter};
 
 use tokenate::*;
 
-use crate::num::Num;
+use crate::{num::Num, parse::OpCmp};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
@@ -20,6 +20,7 @@ pub enum Token {
     CloseParen,
     And,
     Or,
+    Cmp(OpCmp),
 }
 
 impl Display for Token {
@@ -39,6 +40,7 @@ impl Display for Token {
             Token::CloseParen => ')'.fmt(f),
             Token::And => "and".fmt(f),
             Token::Or => "or".fmt(f),
+            Token::Cmp(cmp) => cmp.fmt(f),
         }
     }
 }
@@ -62,7 +64,11 @@ fn ident_pattern() -> impl Pattern<Token = Token> {
 }
 
 fn command_pattern() -> impl Pattern<Token = Token> {
-    ('='.is(Token::Equals))
+    ("<=".is(Token::Cmp(OpCmp::LessOrEqual)))
+        .or(">=".is(Token::Cmp(OpCmp::GreaterOrEqual)))
+        .or("<".is(Token::Cmp(OpCmp::Less)))
+        .or(">".is(Token::Cmp(OpCmp::Greater)))
+        .or('='.is(Token::Equals))
         .or('+'.is(Token::Plus))
         .or('-'.is(Token::Hyphen))
         .or('*'.is(Token::Asterisk))
@@ -71,13 +77,15 @@ fn command_pattern() -> impl Pattern<Token = Token> {
         .or('('.is(Token::OpenParen))
         .or(')'.is(Token::CloseParen))
         .or("and".is(Token::And))
-        .or("or".is(Token::And))
+        .or("or".is(Token::Or))
         // Num
         .or(num_pattern())
         // Simple literals
         .or("nil".is(Token::Nil))
         .or("true".is(Token::Bool(true)))
         .or("false".is(Token::Bool(false)))
+        .or("isnt".is(Token::Cmp(OpCmp::Isnt)))
+        .or("is".is(Token::Cmp(OpCmp::Is)))
         // Ident
         .or(ident_pattern())
 }

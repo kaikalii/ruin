@@ -67,6 +67,32 @@ impl ExprAnd {
     }
 }
 
+impl ExprCmp {
+    fn eval(&self, cb: &Codebase, visited: &mut HashSet<String>) -> EvalResult<Value> {
+        if let Some(right) = &self.right {
+            let op = right.op.data;
+            let left = self.left.data.eval(cb, visited)?;
+            let right = right.expr.data.eval(cb, visited)?;
+            Ok(Value::Bool(match op {
+                OpCmp::Is => left == right,
+                OpCmp::Isnt => left != right,
+                op => match (left, right) {
+                    (Value::Num(a), Value::Num(b)) => match op {
+                        OpCmp::Less => a < b,
+                        OpCmp::Greater => a > b,
+                        OpCmp::LessOrEqual => a <= b,
+                        OpCmp::GreaterOrEqual => a >= b,
+                        _ => unreachable!(),
+                    },
+                    (Value::Num(_), val) | (val, _) => return Err(EvalError::Math(val.ty())),
+                },
+            }))
+        } else {
+            self.left.data.eval(cb, visited)
+        }
+    }
+}
+
 impl ExprAS {
     fn eval(&self, cb: &Codebase, visited: &mut HashSet<String>) -> EvalResult<Value> {
         if let Some(right) = &self.right {
