@@ -22,6 +22,9 @@ pub enum Token {
     And,
     Or,
     Cmp(OpCmp),
+    Fn,
+    Period,
+    Comma,
 }
 
 impl Display for Token {
@@ -43,6 +46,9 @@ impl Display for Token {
             Token::And => "and".fmt(f),
             Token::Or => "or".fmt(f),
             Token::Cmp(cmp) => cmp.fmt(f),
+            Token::Fn => "fn".fmt(f),
+            Token::Period => '.'.fmt(f),
+            Token::Comma => ','.fmt(f),
         }
     }
 }
@@ -103,18 +109,21 @@ fn command_pattern() -> impl Pattern<Token = Token> {
         .or('%'.is(Token::Percent))
         .or('('.is(Token::OpenParen))
         .or(')'.is(Token::CloseParen))
+        .or('.'.is(Token::Period))
+        .or(','.is(Token::Comma))
         .or("and".is(Token::And))
         .or("or".is(Token::Or))
         // Num
         .or(num_pattern())
         // String
         .or(string_literal.map(Token::String))
-        // Simple literals
+        // Keywords
         .or("nil".is(Token::Nil))
         .or("true".is(Token::Bool(true)))
         .or("false".is(Token::Bool(false)))
         .or("isnt".is(Token::Cmp(OpCmp::Isnt)))
         .or("is".is(Token::Cmp(OpCmp::Is)))
+        .or("fn".is(Token::Fn))
         // Ident
         .or(ident_pattern())
 }

@@ -4,7 +4,7 @@ use colored::Colorize;
 use derive_more::Display;
 use tokenate::{LexError, Sp};
 
-use crate::{lexer::*, num::Num};
+use crate::{lexer::*, num::Num, value::Function};
 
 #[derive(Debug, Display)]
 pub enum ParseError {
@@ -83,7 +83,7 @@ impl Tokens {
             None
         }
     }
-    pub fn matching<P>(&mut self, pattern: P) -> Option<Sp<Token>>
+    pub fn take_if<P>(&mut self, pattern: P) -> Option<Sp<Token>>
     where
         P: TokenPattern,
     {
@@ -99,7 +99,7 @@ impl Tokens {
     where
         P: TokenPattern,
     {
-        self.matching(pattern).map(|token| token.span.sp(val))
+        self.take_if(pattern).map(|token| token.span.sp(val))
     }
     pub fn matches<P>(&mut self, pattern: P) -> bool
     where
@@ -111,7 +111,7 @@ impl Tokens {
     where
         P: TokenPattern,
     {
-        self.matching(&pattern)
+        self.take_if(&pattern)
             .ok_or_else(|| ParseError::Expected(pattern.to_string()))
     }
     pub fn _require<F, T>(&mut self, f: F, name: &str) -> Parse<T>
@@ -287,22 +287,44 @@ impl Tokens {
             s.map(Term::String)
         } else if let Some(ident) = self.boolean()? {
             ident.map(Term::Bool)
-        } else if let Some(nil) = self.matching(Token::Nil) {
+        } else if let Some(function) = self.inline_function()? {
+            function.map(Box::new).map(Term::Function)
+        } else if let Some(nil) = self.take_if(Token::Nil) {
             nil.span.sp(Term::Nil)
         } else {
             return Err(ParseError::Expected("term".into()));
         })
     }
+    pub fn inline_function(&mut self) -> MaybeParse<Function> {
+        Ok(if let Some(fn_token) = self.take_if(Token::Fn) {
+            self.require_token(Token::OpenParen)?;
+            let mut args = Vec::new();
+            while let Some(ident) = self.ident()? {
+                args.push(ident.data);
+                if !self.matches(Token::Comma) {
+                    break;
+                }
+            }
+            self.require_token(Token::CloseParen)?;
+            let expr = self.expression()?;
+            Some((fn_token.span | expr.span).sp(Function {
+                args,
+                body: expr.data,
+            }))
+        } else {
+            None
+        })
+    }
 }
 
-#[derive(Debug, Display)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[display(fmt = "{} = {}", "ident.bright_white()", expr)]
 pub struct Assignment {
     pub ident: String,
     pub expr: Expression,
 }
 
-#[derive(Debug, Display)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[display(bound = "O: StdDisplay, T: StdDisplay")]
 #[display(
     fmt = "{}{}",
@@ -340,7 +362,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Right<T, O> {
     pub op: Sp<O>,
     pub expr: Sp<T>,
@@ -352,14 +374,14 @@ impl<T, O> Right<T, O> {
     }
 }
 
-#[derive(Debug, Display)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[display(fmt = "or")]
 pub struct OpOr;
-#[derive(Debug, Display)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[display(fmt = "and")]
 pub struct OpAnd;
 
-#[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OpCmp {
     #[display(fmt = "is")]
     Is,
@@ -375,7 +397,7 @@ pub enum OpCmp {
     GreaterOrEqual,
 }
 
-#[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OpAS {
     #[display(fmt = "+")]
     Add,
@@ -383,7 +405,7 @@ pub enum OpAS {
     Sub,
 }
 
-#[derive(Debug, Display, Clone, Copy)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OpMDR {
     #[display(fmt = "*")]
     Mul,
@@ -400,7 +422,7 @@ pub type ExprCmp = BinExpr<ExprAS, OpCmp>;
 pub type ExprAS = BinExpr<ExprMDR, OpAS>;
 pub type ExprMDR = BinExpr<Term, OpMDR>;
 
-#[derive(Debug, Display)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Term {
     #[display(fmt = "({})", _0)]
     Expr(Box<Expression>),
@@ -412,6 +434,7 @@ pub enum Term {
     Bool(bool),
     #[display(fmt = "{}", "format!(\"{:?}\", _0).green()")]
     String(String),
+    Function(Box<Function>),
     #[display(fmt = "{}", "\"nil\".blue()")]
     Nil,
 }
