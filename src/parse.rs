@@ -178,71 +178,91 @@ impl Tokens {
     }
     pub fn expr_or(&mut self) -> Parse<ExprOr> {
         let left = self.expr_and()?;
-        let right = self
+        let mut rights = Vec::new();
+        while let Some(right) = self
             .matches_as(Token::Or, OpOr)
             .map(|op| self.expr_and().map(|expr| Right::new(op, expr)))
-            .transpose()?;
-        let span = if let Some(right) = &right {
+            .transpose()?
+        {
+            rights.push(right);
+        }
+        let span = if let Some(right) = rights.last() {
             left.span | right.op.span
         } else {
             left.span
         };
-        Ok(span.sp(ExprOr { left, right }))
+        Ok(span.sp(ExprOr { left, rights }))
     }
     pub fn expr_and(&mut self) -> Parse<ExprAnd> {
         let left = self.expr_cmp()?;
-        let right = self
+        let mut rights = Vec::new();
+        while let Some(right) = self
             .matches_as(Token::And, OpAnd)
             .map(|op| self.expr_cmp().map(|expr| Right::new(op, expr)))
-            .transpose()?;
-        let span = if let Some(right) = &right {
+            .transpose()?
+        {
+            rights.push(right);
+        }
+        let span = if let Some(right) = rights.last() {
             left.span | right.op.span
         } else {
             left.span
         };
-        Ok(span.sp(ExprAnd { left, right }))
+        Ok(span.sp(ExprAnd { left, rights }))
     }
     pub fn expr_cmp(&mut self) -> Parse<ExprCmp> {
         let left = self.expr_as()?;
-        let right = self
+        let mut rights = Vec::new();
+        while let Some(right) = self
             .cmp()?
             .map(|op| self.expr_as().map(|expr| Right::new(op, expr)))
-            .transpose()?;
-        let span = if let Some(right) = &right {
+            .transpose()?
+        {
+            rights.push(right);
+        }
+        let span = if let Some(right) = rights.last() {
             left.span | right.op.span
         } else {
             left.span
         };
-        Ok(span.sp(ExprCmp { left, right }))
+        Ok(span.sp(ExprCmp { left, rights }))
     }
     pub fn expr_as(&mut self) -> Parse<ExprAS> {
         let left = self.expr_mdr()?;
-        let right = self
+        let mut rights = Vec::new();
+        while let Some(right) = self
             .matches_as(Token::Plus, OpAS::Add)
             .or_else(|| self.matches_as(Token::Hyphen, OpAS::Sub))
             .map(|op| self.expr_mdr().map(|expr| Right::new(op, expr)))
-            .transpose()?;
-        let span = if let Some(right) = &right {
+            .transpose()?
+        {
+            rights.push(right);
+        }
+        let span = if let Some(right) = rights.last() {
             left.span | right.op.span
         } else {
             left.span
         };
-        Ok(span.sp(ExprAS { left, right }))
+        Ok(span.sp(ExprAS { left, rights }))
     }
     pub fn expr_mdr(&mut self) -> Parse<ExprMDR> {
         let left = self.term()?;
-        let right = self
+        let mut rights = Vec::new();
+        while let Some(right) = self
             .matches_as(Token::Asterisk, OpMDR::Mul)
             .or_else(|| self.matches_as(Token::Slash, OpMDR::Div))
             .or_else(|| self.matches_as(Token::Percent, OpMDR::Rem))
             .map(|op| self.term().map(|expr| Right::new(op, expr)))
-            .transpose()?;
-        let span = if let Some(right) = &right {
+            .transpose()?
+        {
+            rights.push(right);
+        }
+        let span = if let Some(right) = rights.last() {
             left.span | right.op.span
         } else {
             left.span
         };
-        Ok(span.sp(ExprMDR { left, right }))
+        Ok(span.sp(ExprMDR { left, rights }))
     }
     pub fn term(&mut self) -> Parse<Term> {
         Ok(if self.matches(Token::OpenParen) {
@@ -275,11 +295,11 @@ pub struct Assignment {
 #[display(
     fmt = "{}{}",
     "left.data",
-    r#"if let Some(r) = &right { format!(" {} {}", r.op.data, r.expr.data) } else { "".into() }"#
+    r#"rights.iter().map(|r| { format!(" {} {}", r.op.data, r.expr.data) }).collect::<String>()"#
 )]
 pub struct BinExpr<T, O> {
     pub left: Sp<T>,
-    pub right: Option<Right<T, O>>,
+    pub rights: Vec<Right<T, O>>,
 }
 
 pub trait Node {
@@ -294,16 +314,17 @@ where
     fn contains_ident(&self, ident: &str) -> bool {
         self.left.data.contains_ident(ident)
             || self
-                .right
-                .as_ref()
-                .map_or(false, |right| right.expr.data.contains_ident(ident))
+                .rights
+                .iter()
+                .any(|right| right.expr.data.contains_ident(ident))
     }
     fn terms(&self) -> usize {
         self.left.data.terms()
             + self
-                .right
-                .as_ref()
-                .map_or(0, |right| right.expr.data.terms())
+                .rights
+                .iter()
+                .map(|right| right.expr.data.terms())
+                .sum::<usize>()
     }
 }
 

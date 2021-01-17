@@ -39,44 +39,42 @@ pub fn eval_rec(ident: &str, cb: &Codebase, visited: &mut HashSet<String>) -> Ev
 
 impl ExprOr {
     fn eval(&self, cb: &Codebase, visited: &mut HashSet<String>) -> EvalResult<Value> {
-        if let Some(right) = &self.right {
-            let left = self.left.data.eval(cb, visited)?;
-            if left.is_truth() {
-                Ok(left)
+        let mut val = self.left.data.eval(cb, visited)?;
+        for right in &self.rights {
+            val = if val.is_truth() {
+                val
             } else {
-                right.expr.data.eval(cb, visited)
-            }
-        } else {
-            self.left.data.eval(cb, visited)
+                right.expr.data.eval(cb, visited)?
+            };
         }
+        Ok(val)
     }
 }
 
 impl ExprAnd {
     fn eval(&self, cb: &Codebase, visited: &mut HashSet<String>) -> EvalResult<Value> {
-        if let Some(right) = &self.right {
-            let left = self.left.data.eval(cb, visited)?;
-            if left.is_truth() {
-                right.expr.data.eval(cb, visited)
+        let mut val = self.left.data.eval(cb, visited)?;
+        for right in &self.rights {
+            val = if val.is_truth() {
+                right.expr.data.eval(cb, visited)?
             } else {
-                Ok(left)
-            }
-        } else {
-            self.left.data.eval(cb, visited)
+                val
+            };
         }
+        Ok(val)
     }
 }
 
 impl ExprCmp {
     fn eval(&self, cb: &Codebase, visited: &mut HashSet<String>) -> EvalResult<Value> {
-        if let Some(right) = &self.right {
+        let mut val = self.left.data.eval(cb, visited)?;
+        for right in &self.rights {
             let op = right.op.data;
-            let left = self.left.data.eval(cb, visited)?;
             let right = right.expr.data.eval(cb, visited)?;
-            Ok(Value::Bool(match op {
-                OpCmp::Is => left == right,
-                OpCmp::Isnt => left != right,
-                op => match (left, right) {
+            val = Value::Bool(match op {
+                OpCmp::Is => val == right,
+                OpCmp::Isnt => val != right,
+                op => match (val, right) {
                     (Value::Num(a), Value::Num(b)) => match op {
                         OpCmp::Less => a < b,
                         OpCmp::Greater => a > b,
@@ -86,49 +84,46 @@ impl ExprCmp {
                     },
                     (Value::Num(_), val) | (val, _) => return Err(EvalError::Math(val.ty())),
                 },
-            }))
-        } else {
-            self.left.data.eval(cb, visited)
+            });
         }
+        Ok(val)
     }
 }
 
 impl ExprAS {
     fn eval(&self, cb: &Codebase, visited: &mut HashSet<String>) -> EvalResult<Value> {
-        if let Some(right) = &self.right {
+        let mut val = self.left.data.eval(cb, visited)?;
+        for right in &self.rights {
             let op = right.op.data;
-            let left = self.left.data.eval(cb, visited)?;
             let right = right.expr.data.eval(cb, visited)?;
-            match (left, right) {
-                (Value::Num(a), Value::Num(b)) => Ok(Value::Num(match op {
+            val = match (val, right) {
+                (Value::Num(a), Value::Num(b)) => Value::Num(match op {
                     OpAS::Add => a + b,
                     OpAS::Sub => a - b,
-                })),
-                (Value::Num(_), val) | (val, _) => Err(EvalError::Math(val.ty())),
-            }
-        } else {
-            self.left.data.eval(cb, visited)
+                }),
+                (Value::Num(_), val) | (val, _) => return Err(EvalError::Math(val.ty())),
+            };
         }
+        Ok(val)
     }
 }
 
 impl ExprMDR {
     fn eval(&self, cb: &Codebase, visited: &mut HashSet<String>) -> EvalResult<Value> {
-        if let Some(right) = &self.right {
+        let mut val = self.left.data.eval(cb, visited)?;
+        for right in &self.rights {
             let op = right.op.data;
-            let left = self.left.data.eval(cb, visited)?;
             let right = right.expr.data.eval(cb, visited)?;
-            match (left, right) {
-                (Value::Num(a), Value::Num(b)) => Ok(Value::Num(match op {
+            val = match (val, right) {
+                (Value::Num(a), Value::Num(b)) => Value::Num(match op {
                     OpMDR::Mul => a * b,
                     OpMDR::Div => a / b,
                     OpMDR::Rem => a % b,
-                })),
-                (Value::Num(_), val) | (val, _) => Err(EvalError::Math(val.ty())),
-            }
-        } else {
-            self.left.data.eval(cb, visited)
+                }),
+                (Value::Num(_), val) | (val, _) => return Err(EvalError::Math(val.ty())),
+            };
         }
+        Ok(val)
     }
 }
 
