@@ -4,47 +4,47 @@ use derive_more::Display;
 
 use crate::{codebase::*, parse::*, value::*};
 
-#[derive(Debug, Display)]
+#[derive(Debug, Display, Clone)]
 pub enum EvalError {
     #[display(fmt = "Attempted to perform arithmetic on {} value", _0)]
     Math(Type),
     #[display(fmt = "Recursive value detected: {:?}", _0)]
     RecursiveValue(String),
-    #[display(fmt = "Unknown type")]
-    UnknownType,
+    #[display(fmt = "Unknown value \"{}\"", _0)]
+    UnknownValue(String),
 }
 
 pub type EvalResult<T> = Result<T, EvalError>;
 
-pub fn eval(cb: &Codebase, ident: &str) -> EvalResult<Value> {
+pub fn eval(env: &Env, ident: &str) -> EvalResult<Value> {
     let mut visited = HashSet::new();
-    eval_rec(ident, cb, &mut visited)
+    eval_rec(ident, env, &mut visited)
 }
 
-pub fn eval_rec(ident: &str, cb: &Codebase, visited: &mut HashSet<String>) -> EvalResult<Value> {
+pub fn eval_rec(ident: &str, env: &Env, visited: &mut HashSet<String>) -> EvalResult<Value> {
     if visited.contains(ident) {
-        return Err(EvalError::RecursiveValue(ident.into()));
+        return Err(EvalError::RecursiveValue(ident.to_string()));
     }
     visited.insert(ident.into());
-    Ok(if let Some(Evald { expr, res }) = cb.vals.get(ident) {
+    Ok(if let Some(Evald { expr, res }) = env.vals.get(ident) {
         if let Some(Ok(val)) = res {
             val.clone()
         } else {
-            expr.eval(cb, visited)?
+            expr.eval(env, visited)?
         }
     } else {
-        return Err(EvalError::UnknownType);
+        return Err(EvalError::UnknownValue(ident.into()));
     })
 }
 
 impl ExprOr {
-    fn eval(&self, cb: &Codebase, visited: &mut HashSet<String>) -> EvalResult<Value> {
-        let mut val = self.left.data.eval(cb, visited)?;
+    fn eval(&self, env: &Env, visited: &mut HashSet<String>) -> EvalResult<Value> {
+        let mut val = self.left.data.eval(env, visited)?;
         for right in &self.rights {
             val = if val.is_truth() {
                 val
             } else {
-                right.expr.data.eval(cb, visited)?
+                right.expr.data.eval(env, visited)?
             };
         }
         Ok(val)
@@ -52,11 +52,11 @@ impl ExprOr {
 }
 
 impl ExprAnd {
-    fn eval(&self, cb: &Codebase, visited: &mut HashSet<String>) -> EvalResult<Value> {
-        let mut val = self.left.data.eval(cb, visited)?;
+    fn eval(&self, env: &Env, visited: &mut HashSet<String>) -> EvalResult<Value> {
+        let mut val = self.left.data.eval(env, visited)?;
         for right in &self.rights {
             val = if val.is_truth() {
-                right.expr.data.eval(cb, visited)?
+                right.expr.data.eval(env, visited)?
             } else {
                 val
             };
@@ -66,11 +66,11 @@ impl ExprAnd {
 }
 
 impl ExprCmp {
-    fn eval(&self, cb: &Codebase, visited: &mut HashSet<String>) -> EvalResult<Value> {
-        let mut val = self.left.data.eval(cb, visited)?;
+    fn eval(&self, env: &Env, visited: &mut HashSet<String>) -> EvalResult<Value> {
+        let mut val = self.left.data.eval(env, visited)?;
         for right in &self.rights {
             let op = right.op.data;
-            let right = right.expr.data.eval(cb, visited)?;
+            let right = right.expr.data.eval(env, visited)?;
             val = Value::Bool(match op {
                 OpCmp::Is => val == right,
                 OpCmp::Isnt => val != right,
@@ -91,11 +91,11 @@ impl ExprCmp {
 }
 
 impl ExprAS {
-    fn eval(&self, cb: &Codebase, visited: &mut HashSet<String>) -> EvalResult<Value> {
-        let mut val = self.left.data.eval(cb, visited)?;
+    fn eval(&self, env: &Env, visited: &mut HashSet<String>) -> EvalResult<Value> {
+        let mut val = self.left.data.eval(env, visited)?;
         for right in &self.rights {
             let op = right.op.data;
-            let right = right.expr.data.eval(cb, visited)?;
+            let right = right.expr.data.eval(env, visited)?;
             val = match (val, right) {
                 (Value::Num(a), Value::Num(b)) => Value::Num(match op {
                     OpAS::Add => a + b,
@@ -109,11 +109,11 @@ impl ExprAS {
 }
 
 impl ExprMDR {
-    fn eval(&self, cb: &Codebase, visited: &mut HashSet<String>) -> EvalResult<Value> {
-        let mut val = self.left.data.eval(cb, visited)?;
+    fn eval(&self, env: &Env, visited: &mut HashSet<String>) -> EvalResult<Value> {
+        let mut val = self.left.data.eval(env, visited)?;
         for right in &self.rights {
             let op = right.op.data;
-            let right = right.expr.data.eval(cb, visited)?;
+            let right = right.expr.data.eval(env, visited)?;
             val = match (val, right) {
                 (Value::Num(a), Value::Num(b)) => Value::Num(match op {
                     OpMDR::Mul => a * b,
@@ -128,13 +128,13 @@ impl ExprMDR {
 }
 
 impl Term {
-    fn eval(&self, cb: &Codebase, visited: &mut HashSet<String>) -> EvalResult<Value> {
+    fn eval(&self, env: &Env, visited: &mut HashSet<String>) -> EvalResult<Value> {
         Ok(match self {
-            Term::Expr(expr) => expr.eval(cb, visited)?,
+            Term::Expr(expr) => expr.eval(env, visited)?,
             Term::Bool(b) => Value::Bool(*b),
             Term::Num(n) => Value::Num(*n),
             Term::Nil => Value::Nil,
-            Term::Ident(ident) => eval_rec(ident, cb, visited)?,
+            Term::Ident(ident) => eval_rec(ident, env, visited)?,
             Term::String(s) => Value::String(s.clone()),
             Term::Function(f) => Value::Function(f.clone()),
         })

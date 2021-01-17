@@ -4,7 +4,7 @@ use colored::Colorize;
 use derive_more::Display;
 use tokenate::{LexError, Sp};
 
-use crate::{lexer::*, num::Num, value::Function};
+use crate::{lexer::*, num::Num, value::*};
 
 #[derive(Debug, Display)]
 pub enum ParseError {
@@ -172,6 +172,22 @@ impl Tokens {
             }
         }))
     }
+    pub fn path(&mut self) -> MaybeParse<Path> {
+        Ok(if let Some(name) = self.ident()? {
+            let mut end = name.span.end;
+            let mut disam = Vec::new();
+            while let Some(ident) = self.ident()? {
+                disam.push(ident.data);
+                end = ident.span.end;
+            }
+            Some(name.span.start.to(end).sp(Path {
+                name: name.data,
+                disam,
+            }))
+        } else {
+            None
+        })
+    }
     pub fn assigment(&mut self) -> MaybeParse<Assignment> {
         let ident = if let Some(ident) = self.ident()? {
             ident
@@ -281,12 +297,12 @@ impl Tokens {
             expr.map(Box::new).map(Term::Expr)
         } else if let Some(num) = self.num()? {
             num.map(Term::Num)
-        } else if let Some(b) = self.ident()? {
-            b.map(Term::Ident)
+        } else if let Some(ident) = self.ident()? {
+            ident.map(Term::Ident)
         } else if let Some(s) = self.string_literal()? {
             s.map(Term::String)
-        } else if let Some(ident) = self.boolean()? {
-            ident.map(Term::Bool)
+        } else if let Some(b) = self.boolean()? {
+            b.map(Term::Bool)
         } else if let Some(function) = self.inline_function()? {
             function.map(Box::new).map(Term::Function)
         } else if let Some(nil) = self.take_if(Token::Nil) {
@@ -423,6 +439,17 @@ pub type ExprAS = BinExpr<ExprMDR, OpAS>;
 pub type ExprMDR = BinExpr<Term, OpMDR>;
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[display(
+    fmt = "{}{}",
+    r#"disam.iter().map(|s| format!("{}.", s)).collect::<String>()"#,
+    name
+)]
+pub struct Path {
+    pub disam: Vec<String>,
+    pub name: String,
+}
+
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Term {
     #[display(fmt = "({})", _0)]
     Expr(Box<Expression>),
@@ -443,7 +470,7 @@ impl Node for Term {
     fn contains_ident(&self, ident: &str) -> bool {
         match self {
             Term::Expr(expr) => expr.contains_ident(ident),
-            Term::Ident(i) => i == ident,
+            Term::Ident(p) => p == ident,
             _ => false,
         }
     }

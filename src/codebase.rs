@@ -1,11 +1,34 @@
+use std::cmp::Ordering;
+
 use colored::Colorize;
 use indexmap::IndexMap;
 
 use crate::{eval::*, parse::*, value::Value};
 
+#[derive(Debug, Clone)]
 pub struct Evald {
     pub expr: Expression,
     pub res: Option<EvalResult<Value>>,
+}
+
+impl PartialEq for Evald {
+    fn eq(&self, other: &Self) -> bool {
+        self.expr.eq(&other.expr)
+    }
+}
+
+impl Eq for Evald {}
+
+impl PartialOrd for Evald {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.expr.partial_cmp(&other.expr)
+    }
+}
+
+impl Ord for Evald {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.expr.cmp(&other.expr)
+    }
 }
 
 impl Evald {
@@ -20,19 +43,19 @@ impl Evald {
                     format!("{} = {}", self.expr, val)
                 }
             }
-            Some(Err(EvalError::UnknownType)) => format!("{}", self.expr),
+            Some(Err(EvalError::UnknownValue(_))) => format!("{}", self.expr),
             Some(Err(e)) => format!("{} = {}", self.expr, e.to_string().red()),
             None => format!("{}", self.expr),
         }
     }
 }
 
-#[derive(Default)]
-pub struct Codebase {
+#[derive(Debug, Clone, Default)]
+pub struct Env {
     pub vals: IndexMap<String, Evald>,
 }
 
-impl Codebase {
+impl Env {
     pub fn assign(&mut self, ass: Assignment) {
         // Unassign results that depend on the ident
         self.unassign_results(&ass.ident);
