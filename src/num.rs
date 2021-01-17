@@ -1,6 +1,7 @@
 use std::{
     cmp::Ordering,
     fmt::{self, Debug, Display, Formatter},
+    hash::{Hash, Hasher},
     num::ParseFloatError,
     ops::*,
     str::FromStr,
@@ -60,7 +61,9 @@ impl From<Num> for f64 {
 
 impl PartialEq for Num {
     fn eq(&self, other: &Self) -> bool {
-        (f64::from(*self) - f64::from(*other)).abs() < std::f64::EPSILON
+        let a = f64::from(*self);
+        let b = f64::from(*other);
+        a.is_nan() && b.is_nan() || a == b
     }
 }
 
@@ -82,6 +85,16 @@ impl Ord for Num {
             (true, false) => Ordering::Greater,
             (true, true) => Ordering::Equal,
         }
+    }
+}
+
+impl Hash for Num {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
+        #[allow(clippy::transmute_float_to_int)]
+        unsafe { std::mem::transmute::<_, i64>(f64::from(*self)) }.hash(state);
     }
 }
 

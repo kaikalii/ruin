@@ -8,6 +8,8 @@ use crate::num::Num;
 pub enum Token {
     Ident(String),
     Num(Num),
+    Bool(bool),
+    Nil,
     Equals,
     Plus,
     Hyphen,
@@ -25,6 +27,8 @@ impl Display for Token {
         match self {
             Token::Ident(ident) => ident.fmt(f),
             Token::Num(num) => num.fmt(f),
+            Token::Bool(b) => b.fmt(f),
+            Token::Nil => "nil".fmt(f),
             Token::Equals => '='.fmt(f),
             Token::Plus => '+'.fmt(f),
             Token::Hyphen => '-'.fmt(f),
@@ -70,6 +74,10 @@ fn command_pattern() -> impl Pattern<Token = Token> {
         .or("or".is(Token::And))
         // Num
         .or(num_pattern())
+        // Simple literals
+        .or("nil".is(Token::Nil))
+        .or("true".is(Token::Bool(true)))
+        .or("false".is(Token::Bool(false)))
         // Ident
         .or(ident_pattern())
 }

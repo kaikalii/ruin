@@ -3,7 +3,7 @@ use std::fmt::Display as StdDisplay;
 use derive_more::Display;
 use tokenate::{LexError, Sp};
 
-use crate::{lexer::*, num::Num};
+use crate::{lexer::*, num::Num, types::Type};
 
 #[derive(Debug, Display)]
 pub enum ParseError {
@@ -145,6 +145,15 @@ impl Tokens {
             }
         }))
     }
+    pub fn boolean(&mut self) -> MaybeParse<bool> {
+        Ok(self.take_as(|token| {
+            if let Token::Bool(b) = token {
+                Ok(b)
+            } else {
+                Err(token)
+            }
+        }))
+    }
     pub fn assigment(&mut self) -> MaybeParse<Assignment> {
         let ident = if let Some(ident) = self.ident()? {
             ident
@@ -221,8 +230,12 @@ impl Tokens {
             expr.map(Box::new).map(Term::Expr)
         } else if let Some(num) = self.num()? {
             num.map(Term::Num)
-        } else if let Some(ident) = self.ident()? {
-            ident.map(Term::Ident)
+        } else if let Some(b) = self.ident()? {
+            b.map(Term::Ident)
+        } else if let Some(ident) = self.boolean()? {
+            ident.map(Term::Bool)
+        } else if let Some(nil) = self.matching(Token::Nil) {
+            nil.span.sp(Term::Nil)
         } else {
             return Err(ParseError::Expected("term".into()));
         })
@@ -285,11 +298,11 @@ pub enum OpMDR {
     Rem,
 }
 
-type Expression = ExprOr;
-type ExprOr = BinExpr<ExprAnd, OpOr>;
-type ExprAnd = BinExpr<ExprAS, OpAnd>;
-type ExprAS = BinExpr<ExprMDR, OpAS>;
-type ExprMDR = BinExpr<Term, OpMDR>;
+pub type Expression = ExprOr;
+pub type ExprOr = BinExpr<ExprAnd, OpOr>;
+pub type ExprAnd = BinExpr<ExprAS, OpAnd>;
+pub type ExprAS = BinExpr<ExprMDR, OpAS>;
+pub type ExprMDR = BinExpr<Term, OpMDR>;
 
 #[derive(Debug, Display)]
 pub enum Term {
@@ -299,6 +312,22 @@ pub enum Term {
     Num(Num),
     #[display(fmt = "{}", _0)]
     Ident(String),
+    #[display(fmt = "{}", _0)]
+    Bool(bool),
+    #[display(fmt = "nil")]
+    Nil,
+}
+
+impl Term {
+    pub fn ty(&self) -> Type {
+        match self {
+            Term::Expr(expr) => todo!(),
+            Term::Num(_) => Type::Number,
+            Term::Ident(_) => todo!(),
+            Term::Bool(_) => Type::Bool,
+            Term::Nil => Type::Nil,
+        }
+    }
 }
 
 pub fn parse(input: &str) -> Result<Command, ParseError> {
