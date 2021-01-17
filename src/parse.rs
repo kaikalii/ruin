@@ -2,6 +2,7 @@ use std::fmt::Display as StdDisplay;
 
 use colored::Colorize;
 use derive_more::Display;
+use itertools::Itertools;
 use tokenate::{LexError, Sp};
 
 use crate::{lexer::*, num::Num, value::*};
@@ -172,7 +173,7 @@ impl Tokens {
             }
         }))
     }
-    pub fn path(&mut self) -> MaybeParse<Path> {
+    pub fn _path(&mut self) -> MaybeParse<Path> {
         Ok(if let Some(name) = self.ident()? {
             let mut end = name.span.end;
             let mut disam = Vec::new();
@@ -290,6 +291,7 @@ impl Tokens {
         };
         Ok(span.sp(ExprMDR { left, rights }))
     }
+    pub fn expr_call(&mut self) -> Parse<ExprCall> {}
     pub fn term(&mut self) -> Parse<Term> {
         Ok(if self.matches(Token::OpenParen) {
             let expr = self.expression()?;
@@ -436,7 +438,20 @@ pub type ExprOr = BinExpr<ExprAnd, OpOr>;
 pub type ExprAnd = BinExpr<ExprCmp, OpAnd>;
 pub type ExprCmp = BinExpr<ExprAS, OpCmp>;
 pub type ExprAS = BinExpr<ExprMDR, OpAS>;
-pub type ExprMDR = BinExpr<Term, OpMDR>;
+pub type ExprMDR = BinExpr<Term, ExprCall>;
+
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[display(
+    fmt = "{}({})",
+    term,
+    r#"args.as_ref().map(
+        |args| args.iter().map(ToString::to_string).intersperse(", ".into()).collect::<String>()
+    ).unwrap_or_default()"#
+)]
+pub struct ExprCall {
+    pub term: Term,
+    pub args: Option<Vec<Expression>>,
+}
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[display(

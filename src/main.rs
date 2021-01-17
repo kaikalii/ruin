@@ -9,19 +9,19 @@ use std::io::{stdin, stdout, BufRead, Write};
 
 use colored::Colorize;
 
-use codebase::Env;
+use codebase::Codebase;
 use parse::{parse, Command};
 
 fn main() {
-    let mut env = Env::default();
+    let mut cb = Codebase::default();
     print_prompt();
     for input in stdin().lock().lines().filter_map(Result::ok) {
         match parse(&input) {
             Ok(command) => match command {
                 Command::Assignment(ass) => {
-                    env.assign(ass);
-                    env.eval_all();
-                    env.print(10);
+                    cb.push(ass.ident, ass.expr);
+                    cb.eval_all();
+                    cb.print(10);
                 }
             },
             Err(e) => println!("Error: {}\n", e),
