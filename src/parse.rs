@@ -53,20 +53,20 @@ impl<'a> TokenPattern for &'a str {
     }
 }
 
-#[derive(Debug, Display)]
+#[derive(Debug)]
 pub enum Command {
-    #[display(fmt = "{}", _0)]
     Assignment(Assignment),
+    Load(String),
 }
 
 struct Tokens {
     iter: std::vec::IntoIter<Sp<Token>>,
-    put_back: Option<Sp<Token>>,
+    put_back: Vec<Sp<Token>>,
 }
 
 impl Tokens {
     pub fn take(&mut self) -> Option<Sp<Token>> {
-        self.put_back.take().or_else(|| self.iter.next())
+        self.put_back.pop().or_else(|| self.iter.next())
     }
     pub fn take_as<F, T>(&mut self, f: F) -> Option<Sp<T>>
     where
@@ -76,13 +76,16 @@ impl Tokens {
             match f(sp_token.data) {
                 Ok(val) => Some(sp_token.span.sp(val)),
                 Err(token) => {
-                    self.put_back = Some(sp_token.span.sp(token));
+                    self.put_back.push(sp_token.span.sp(token));
                     None
                 }
             }
         } else {
             None
         }
+    }
+    pub fn put_back(&mut self, token: Sp<Token>) {
+        self.put_back.push(token);
     }
     pub fn take_if<P>(&mut self, pattern: P) -> Option<Sp<Token>>
     where
@@ -124,6 +127,8 @@ impl Tokens {
     pub fn command(&mut self) -> Parse<Command> {
         if let Some(ass) = self.assigment()? {
             Ok(ass.map(Command::Assignment))
+        } else if let Some(ident) = self.ident()? {
+            todo!()
         } else {
             Err(ParseError::InvalidCommand)
         }
@@ -192,7 +197,10 @@ impl Tokens {
         } else {
             return Ok(None);
         };
-        self.require_token(Token::Equals)?;
+        if !self.matches(Token::Equals) {
+            self.put_back(ident.map(Token::Ident));
+            return Ok(None);
+        }
         let expr = self.expression()?;
         let ass = ident.join(expr, |ident, expr| Assignment { ident, expr });
         Ok(Some(ass))
@@ -575,7 +583,7 @@ impl Node for Term {
 pub fn parse(input: &str) -> Result<Command, ParseError> {
     Tokens {
         iter: lex(input)?.into_iter(),
-        put_back: None,
+        put_back: Vec::new(),
     }
     .command()
     .map(|com| com.data)

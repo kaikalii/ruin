@@ -25,6 +25,7 @@ fn main() {
                     cb.eval_all();
                     cb.print(10);
                 }
+                _ => {}
             },
             Err(e) => println!("Error: {}\n", e),
         }
