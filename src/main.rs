@@ -13,13 +13,15 @@ use codebase::Codebase;
 use parse::{parse, Command};
 
 fn main() {
+    color_backtrace::install();
+
     let mut cb = Codebase::default();
     print_prompt();
     for input in stdin().lock().lines().filter_map(Result::ok) {
         match parse(&input) {
             Ok(command) => match command {
                 Command::Assignment(ass) => {
-                    cb.push(ass.ident, ass.expr);
+                    cb.insert(ass.ident, ass.expr);
                     cb.eval_all();
                     cb.print(10);
                 }

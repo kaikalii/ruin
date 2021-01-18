@@ -181,10 +181,7 @@ impl Tokens {
                 disam.push(ident.data);
                 end = ident.span.end;
             }
-            Some(name.span.start.to(end).sp(Path {
-                name: name.data,
-                disam,
-            }))
+            Some(name.span.start.to(end).sp(Path::new(disam, name.data)))
         } else {
             None
         })
@@ -273,13 +270,13 @@ impl Tokens {
         Ok(span.sp(ExprAS { left, rights }))
     }
     pub fn expr_mdr(&mut self) -> Parse<ExprMDR> {
-        let left = self.term()?;
+        let left = self.expr_call()?;
         let mut rights = Vec::new();
         while let Some(right) = self
             .matches_as(Token::Asterisk, OpMDR::Mul)
             .or_else(|| self.matches_as(Token::Slash, OpMDR::Div))
             .or_else(|| self.matches_as(Token::Percent, OpMDR::Rem))
-            .map(|op| self.term().map(|expr| Right::new(op, expr)))
+            .map(|op| self.expr_call().map(|expr| Right::new(op, expr)))
             .transpose()?
         {
             rights.push(right);
@@ -291,7 +288,29 @@ impl Tokens {
         };
         Ok(span.sp(ExprMDR { left, rights }))
     }
-    pub fn expr_call(&mut self) -> Parse<ExprCall> {}
+    pub fn expr_call(&mut self) -> Parse<ExprCall> {
+        let term = self.term()?;
+        let mut end = term.span.end;
+        let args = if self.matches(Token::OpenParen) {
+            let mut args = Vec::new();
+            while !self.matches(Token::CloseParen) {
+                let expr = self.expression()?;
+                end = expr.span.end;
+                args.push(expr.data);
+                if !self.matches(Token::Comma) {
+                    self.require_token(Token::CloseParen)?;
+                    break;
+                }
+            }
+            Some(args)
+        } else {
+            None
+        };
+        Ok(term.span.start.to(end).sp(ExprCall {
+            term: term.data,
+            args,
+        }))
+    }
     pub fn term(&mut self) -> Parse<Term> {
         Ok(if self.matches(Token::OpenParen) {
             let expr = self.expression()?;
@@ -438,14 +457,14 @@ pub type ExprOr = BinExpr<ExprAnd, OpOr>;
 pub type ExprAnd = BinExpr<ExprCmp, OpAnd>;
 pub type ExprCmp = BinExpr<ExprAS, OpCmp>;
 pub type ExprAS = BinExpr<ExprMDR, OpAS>;
-pub type ExprMDR = BinExpr<Term, ExprCall>;
+pub type ExprMDR = BinExpr<ExprCall, OpMDR>;
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[display(
-    fmt = "{}({})",
+    fmt = "{}{}",
     term,
     r#"args.as_ref().map(
-        |args| args.iter().map(ToString::to_string).intersperse(", ".into()).collect::<String>()
+        |args| format!("({})", args.iter().map(ToString::to_string).intersperse(", ".into()).collect::<String>())
     ).unwrap_or_default()"#
 )]
 pub struct ExprCall {
@@ -453,15 +472,69 @@ pub struct ExprCall {
     pub args: Option<Vec<Expression>>,
 }
 
+impl Node for ExprCall {
+    fn contains_ident(&self, ident: &str) -> bool {
+        self.term.contains_ident(ident)
+            || self.args.as_ref().map_or(false, |args| {
+                args.iter().any(|arg| arg.contains_ident(ident))
+            })
+    }
+    fn terms(&self) -> usize {
+        self.term.terms()
+            + self
+                .args
+                .as_ref()
+                .map_or(0, |args| args.iter().map(Node::terms).sum())
+    }
+}
+
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[display(
     fmt = "{}{}",
     r#"disam.iter().map(|s| format!("{}.", s)).collect::<String>()"#,
-    name
+    "name.as_deref().unwrap_or_default()"
 )]
 pub struct Path {
     pub disam: Vec<String>,
-    pub name: String,
+    pub name: Option<String>,
+}
+
+impl<S> From<S> for Path
+where
+    S: Into<String>,
+{
+    fn from(s: S) -> Self {
+        Path::new(Option::<String>::None, s)
+    }
+}
+
+impl Path {
+    pub const GLOBAL: Self = Path {
+        disam: Vec::new(),
+        name: None,
+    };
+    pub fn new<D, N>(disam: D, name: N) -> Self
+    where
+        D: IntoIterator,
+        D::Item: Into<String>,
+        N: Into<String>,
+    {
+        Path {
+            disam: disam.into_iter().map(Into::into).collect(),
+            name: Some(name.into()),
+        }
+    }
+    pub fn join<P>(&self, other: P) -> Self
+    where
+        P: Into<Path>,
+    {
+        let mut base = self.clone();
+        let other = other.into();
+        base.disam.extend(base.name);
+        base.disam.extend(other.disam);
+        base.name = other.name;
+        base
+    }
 }
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -486,6 +559,7 @@ impl Node for Term {
         match self {
             Term::Expr(expr) => expr.contains_ident(ident),
             Term::Ident(p) => p == ident,
+            Term::Function(f) => f.body.contains_ident(ident) && !f.args.iter().any(|i| i == ident),
             _ => false,
         }
     }

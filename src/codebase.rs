@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::rc::Rc;
 
 use colored::Colorize;
 use indexmap::IndexMap;
@@ -7,33 +7,46 @@ use crate::{eval::*, parse::*, value::Value};
 
 #[derive(Debug, Clone, Default)]
 pub struct Codebase {
-    pub vals: IndexMap<String, Vec<Evald>>,
+    pub parent: Option<Rc<Self>>,
+    pub vals: IndexMap<String, Evald>,
 }
 
 impl Codebase {
+    pub fn push(&mut self, mut child: Self) {
+        std::mem::swap(self, &mut child);
+        self.parent = Some(Rc::new(child));
+    }
+    pub fn pop(&mut self) -> Self {
+        let mut parent = Rc::try_unwrap(self.parent.take().unwrap()).unwrap();
+        std::mem::swap(self, &mut parent);
+        parent
+    }
     pub fn get(&self, ident: &str) -> Option<&Evald> {
-        self.vals.get(ident).and_then(|stack| stack.last())
+        self.vals
+            .get(ident)
+            .or_else(|| self.parent.as_ref().and_then(|parent| parent.get(ident)))
     }
-    pub fn get_mut(&mut self, ident: &str) -> Option<&mut Evald> {
-        self.vals.get_mut(ident).and_then(|stack| stack.last_mut())
-    }
-    pub fn stack_size(&self, ident: &str) -> usize {
-        self.vals.get(ident).map(|stack| stack.len()).unwrap_or(0)
-    }
-    pub fn push(&mut self, ident: String, expr: Expression) {
+    pub fn insert(&mut self, ident: String, expr: Expression) {
         // Unassign results that depend on the ident
         self.unassign_results(&ident);
         // Insert
-        let mut stack = self.vals.remove(&ident).unwrap_or_default();
-        stack.push(Evald { expr, res: None });
-        self.vals.insert(ident, stack);
+        self.vals.remove(&ident);
+        self.vals.insert(
+            ident,
+            Evald {
+                expr: Some(expr),
+                res: None,
+            },
+        );
     }
-    pub fn pop(&mut self, ident: &str) -> Option<Evald> {
-        if let Some(stack) = self.vals.get_mut(ident) {
-            stack.pop()
-        } else {
-            None
-        }
+    pub fn insert_val(&mut self, ident: String, val: Value) {
+        self.vals.insert(
+            ident,
+            Evald {
+                expr: None,
+                res: Some(Ok(val)),
+            },
+        );
     }
     pub fn print(&self, n: usize) {
         println!();
@@ -41,18 +54,13 @@ impl Codebase {
             println!("...");
         }
         for (ident, evald) in self.vals.iter().rev().take(n).rev() {
-            println!(
-                "{} = {}",
-                ident.to_string().bold(),
-                evald.last().unwrap().format()
-            )
+            println!("{} = {}", ident.to_string().bold(), evald.format())
         }
         println!();
     }
     pub fn evaled_count(&self) -> usize {
         self.vals
             .values()
-            .flatten()
             .filter(|val| val.res.as_ref().map_or(false, |res| res.is_ok()))
             .count()
     }
@@ -60,9 +68,9 @@ impl Codebase {
         let mut idents = vec![ident.to_owned()];
         while !idents.is_empty() {
             for ident in idents.drain(..).collect::<Vec<_>>() {
-                for (id, stack) in &mut self.vals {
-                    for evald in stack {
-                        if evald.expr.contains_ident(&ident) {
+                for (id, evald) in &mut self.vals {
+                    if let Some(expr) = &evald.expr {
+                        if expr.contains_ident(&ident) {
                             evald.res = None;
                             idents.push(id.clone());
                         }
@@ -78,10 +86,8 @@ impl Codebase {
         // Loop until the number of success counts does not change
         loop {
             for ident in &idents {
-                for index in 0..self.stack_size(ident) {
-                    let res = eval(self, ident, index);
-                    self.vals.get_mut(ident).unwrap()[index].res = Some(res);
-                }
+                let res = eval(self, ident);
+                self.vals.get_mut(ident).unwrap().res = Some(res);
             }
             let new_count = self.evaled_count();
             if new_count == count {
@@ -94,45 +100,29 @@ impl Codebase {
 
 #[derive(Debug, Clone)]
 pub struct Evald {
-    pub expr: Expression,
+    pub expr: Option<Expression>,
     pub res: Option<EvalResult<Value>>,
-}
-
-impl PartialEq for Evald {
-    fn eq(&self, other: &Self) -> bool {
-        self.expr.eq(&other.expr)
-    }
-}
-
-impl Eq for Evald {}
-
-impl PartialOrd for Evald {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.expr.partial_cmp(&other.expr)
-    }
-}
-
-impl Ord for Evald {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.expr.cmp(&other.expr)
-    }
 }
 
 impl Evald {
     pub fn format(&self) -> String {
+        let expr = self
+            .expr
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default();
         match &self.res {
             Some(Ok(val)) => {
                 let val = val.to_string();
-                let expr = self.expr.to_string();
                 if val == expr {
                     val
                 } else {
-                    format!("{} = {}", self.expr, val)
+                    format!("{} = {}", expr, val)
                 }
             }
-            Some(Err(EvalError::UnknownValue(_))) => format!("{}", self.expr),
-            Some(Err(e)) => format!("{} = {}", self.expr, e.to_string().red()),
-            None => format!("{}", self.expr),
+            Some(Err(EvalError::UnknownValue(_))) => expr,
+            Some(Err(e)) => format!("{} = {}", expr, e.to_string().red()),
+            None => expr,
         }
     }
 }
