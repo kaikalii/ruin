@@ -1,3 +1,5 @@
+use std::iter::repeat;
+
 use derive_more::Display;
 
 use crate::{codebase::*, parse::*, value::*};
@@ -142,8 +144,13 @@ impl ExprCall {
             for arg in args {
                 arg_vals.push(arg.eval(cb, caller)?);
             }
+
             let mut function_cb = Codebase::default();
-            for (name, val) in function.args.iter().zip(arg_vals) {
+            for (name, val) in function
+                .args
+                .iter()
+                .zip(arg_vals.into_iter().chain(repeat(Value::Nil)))
+            {
                 function_cb.insert_val(name.into(), val);
             }
             for (ident, expr) in &function.env {

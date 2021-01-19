@@ -26,11 +26,6 @@ impl Codebase {
             .get(path)
             .or_else(|| self.parent.as_ref().and_then(|parent| parent.get(path)))
     }
-    pub fn get_ident(&self, ident: &str) -> Option<&Evald> {
-        let path: Path = ident.into();
-        self.get(&path)
-            .or_else(|| self.parent.as_ref().and_then(|parent| parent.get(&path)))
-    }
     pub fn insert(&mut self, path: Path, expr: Expression) {
         // Unassign results that depend on the path
         self.unassign_results(&path);
@@ -104,13 +99,40 @@ impl Codebase {
     }
     fn eval_path(&mut self, path: &Path) {
         let res = eval(self, path);
-        if path.disam.is_empty() {
-            if let Some(evald) = self.vals.get_mut(path) {
-                evald.res = Some(res);
-                return;
+        if let Some(evald) = self.vals.get_mut(path) {
+            evald.res = Some(res);
+        }
+        if !path.disam.is_empty() {
+            if let Some(parent) = path.parent() {
+                self.eval_path(&parent);
+                if let Some(evald) = self.vals.get(path) {
+                    if let Some(expr) = evald.expr.clone() {
+                        if let Some(evald) = self.vals.get_mut(&parent) {
+                            if let Some(res) = &mut evald.res {
+                                match res {
+                                    Ok(Value::Function(function)) => {
+                                        let function = Rc::make_mut(function);
+                                        function.env =
+                                            function.env.insert(path.name.clone().unwrap(), expr);
+                                    }
+                                    Ok(val) => {
+                                        let ty = val.ty();
+                                        let expr = evald
+                                            .expr
+                                            .as_ref()
+                                            .map(ToString::to_string)
+                                            .unwrap_or_else(|| val.to_string());
+                                        self.vals.get_mut(path).unwrap().res =
+                                            Some(Err(EvalError::CantAssign { expr, ty }));
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
-        todo!()
     }
 }
 
