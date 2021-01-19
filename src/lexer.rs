@@ -1,4 +1,7 @@
-use std::fmt::{self, Display, Formatter};
+use std::{
+    fmt::{self, Display, Formatter},
+    io::Read,
+};
 
 use tokenate::*;
 
@@ -132,8 +135,10 @@ thread_local! {
     static COMMAND_PATTERN: Box<dyn Pattern<Token = Token>> = Box::new(command_pattern());
 }
 
-pub fn lex(input: &str) -> LexResult<Vec<Sp<Token>>> {
-    COMMAND_PATTERN.with(move |pattern| {
-        Chars::new(input.as_bytes()).tokenize(pattern, &char::is_whitespace.any())
-    })
+pub fn lex<R>(input: R) -> LexResult<Vec<Sp<Token>>>
+where
+    R: Read,
+{
+    COMMAND_PATTERN
+        .with(move |pattern| Chars::new(input).tokenize(pattern, &char::is_whitespace.any()))
 }

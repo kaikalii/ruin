@@ -1,4 +1,4 @@
-use std::fmt::Display as StdDisplay;
+use std::{fmt::Display as StdDisplay, io::Read, path::PathBuf};
 
 use colored::Colorize;
 use derive_more::Display;
@@ -56,7 +56,7 @@ impl<'a> TokenPattern for &'a str {
 #[derive(Debug)]
 pub enum Command {
     Assignment(Assignment),
-    Load(String),
+    Load(Path),
 }
 
 struct Tokens {
@@ -118,7 +118,7 @@ impl Tokens {
         self.take_if(&pattern)
             .ok_or_else(|| ParseError::Expected(pattern.to_string()))
     }
-    pub fn _require<F, T>(&mut self, f: F, name: &str) -> Parse<T>
+    pub fn require<F, T>(&mut self, f: F, name: &str) -> Parse<T>
     where
         F: Fn(&mut Self) -> MaybeParse<T>,
     {
@@ -127,8 +127,9 @@ impl Tokens {
     pub fn command(&mut self) -> Parse<Command> {
         if let Some(ass) = self.assigment()? {
             Ok(ass.map(Command::Assignment))
-        } else if let Some(ident) = self.ident()? {
-            todo!()
+        } else if self.ident()?.filter(|s| s.data == "load").is_some() {
+            let path = self.require(Self::path, "path")?;
+            Ok(path.map(Command::Load))
         } else {
             Err(ParseError::InvalidCommand)
         }
@@ -178,7 +179,7 @@ impl Tokens {
             }
         }))
     }
-    pub fn _path(&mut self) -> MaybeParse<Path> {
+    pub fn path(&mut self) -> MaybeParse<Path> {
         Ok(if let Some(name) = self.ident()? {
             let mut end = name.span.end;
             let mut disam = Vec::new();
@@ -543,6 +544,12 @@ impl Path {
         base.name = other.name;
         base
     }
+    pub fn as_path_buf(&self) -> PathBuf {
+        let mut path = PathBuf::new();
+        path.extend(&self.disam);
+        path.extend(&self.name);
+        path.with_extension("ruin")
+    }
 }
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -580,7 +587,10 @@ impl Node for Term {
     }
 }
 
-pub fn parse(input: &str) -> Result<Command, ParseError> {
+pub fn parse<R>(input: R) -> Result<Command, ParseError>
+where
+    R: Read,
+{
     Tokens {
         iter: lex(input)?.into_iter(),
         put_back: Vec::new(),

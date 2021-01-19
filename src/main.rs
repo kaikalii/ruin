@@ -5,7 +5,10 @@ mod num;
 mod parse;
 mod value;
 
-use std::io::{stdin, stdout, BufRead, Write};
+use std::{
+    fs,
+    io::{stdin, stdout, BufRead, Write},
+};
 
 use colored::Colorize;
 
@@ -18,18 +21,35 @@ fn main() {
     let mut cb = Codebase::default();
     print_prompt();
     for input in stdin().lock().lines().filter_map(Result::ok) {
-        match parse(&input) {
-            Ok(command) => match command {
-                Command::Assignment(ass) => {
-                    cb.insert(ass.ident, ass.expr);
+        handle_input(&input, &mut cb, true);
+        print_prompt();
+    }
+}
+
+fn handle_input(input: &str, cb: &mut Codebase, eval: bool) {
+    match parse(input.as_bytes()) {
+        Ok(command) => match command {
+            Command::Assignment(ass) => {
+                cb.insert(ass.ident, ass.expr);
+                if eval {
                     cb.eval_all();
                     cb.print(10);
                 }
-                _ => {}
+            }
+            Command::Load(path) => match fs::read_to_string(path.as_path_buf()) {
+                Ok(text) => {
+                    for line in text.lines() {
+                        handle_input(line, cb, false);
+                    }
+                    if eval {
+                        cb.eval_all();
+                        cb.print(10);
+                    }
+                }
+                Err(_) => println!("Unable to open file with path {}", path),
             },
-            Err(e) => println!("Error: {}\n", e),
-        }
-        print_prompt();
+        },
+        Err(e) => println!("Error: {}\n", e),
     }
 }
 
