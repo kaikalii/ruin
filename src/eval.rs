@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use derive_more::Display;
 
 use crate::{codebase::*, parse::*, value::*};
@@ -19,22 +17,15 @@ pub enum EvalError {
 pub type EvalResult<T> = Result<T, EvalError>;
 
 pub fn eval(cb: &mut Codebase, ident: &str) -> EvalResult<Value> {
-    let mut visited = HashSet::new();
-    eval_rec(ident, cb, &mut visited)
+    eval_rec(ident, cb, ident)
 }
 
-type Visited = HashSet<String>;
-
-pub fn eval_rec(ident: &str, cb: &mut Codebase, visited: &mut Visited) -> EvalResult<Value> {
-    if visited.contains(ident) {
-        return Err(EvalError::RecursiveValue(ident.to_string()));
-    }
-    visited.insert(ident.into());
+pub fn eval_rec(ident: &str, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
     Ok(if let Some(Evald { expr, res }) = cb.get(ident) {
         if let Some(Ok(val)) = res {
             val.clone()
         } else if let Some(expr) = expr {
-            expr.clone().eval(cb, visited)?
+            expr.clone().eval(cb, caller)?
         } else {
             panic!("Invalid evald configuration")
         }
@@ -44,13 +35,13 @@ pub fn eval_rec(ident: &str, cb: &mut Codebase, visited: &mut Visited) -> EvalRe
 }
 
 impl ExprOr {
-    fn eval(&self, cb: &mut Codebase, visited: &mut Visited) -> EvalResult<Value> {
-        let mut val = self.left.data.eval(cb, visited)?;
+    fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+        let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             val = if val.is_truth() {
                 val
             } else {
-                right.expr.data.eval(cb, visited)?
+                right.expr.data.eval(cb, caller)?
             };
         }
         Ok(val)
@@ -58,11 +49,11 @@ impl ExprOr {
 }
 
 impl ExprAnd {
-    fn eval(&self, cb: &mut Codebase, visited: &mut Visited) -> EvalResult<Value> {
-        let mut val = self.left.data.eval(cb, visited)?;
+    fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+        let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             val = if val.is_truth() {
-                right.expr.data.eval(cb, visited)?
+                right.expr.data.eval(cb, caller)?
             } else {
                 val
             };
@@ -72,11 +63,11 @@ impl ExprAnd {
 }
 
 impl ExprCmp {
-    fn eval(&self, cb: &mut Codebase, visited: &mut Visited) -> EvalResult<Value> {
-        let mut val = self.left.data.eval(cb, visited)?;
+    fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+        let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             let op = right.op.data;
-            let right = right.expr.data.eval(cb, visited)?;
+            let right = right.expr.data.eval(cb, caller)?;
             val = Value::Bool(match op {
                 OpCmp::Is => val == right,
                 OpCmp::Isnt => val != right,
@@ -97,11 +88,11 @@ impl ExprCmp {
 }
 
 impl ExprAS {
-    fn eval(&self, cb: &mut Codebase, visited: &mut Visited) -> EvalResult<Value> {
-        let mut val = self.left.data.eval(cb, visited)?;
+    fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+        let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             let op = right.op.data;
-            let right = right.expr.data.eval(cb, visited)?;
+            let right = right.expr.data.eval(cb, caller)?;
             val = match (val, right) {
                 (Value::Num(a), Value::Num(b)) => Value::Num(match op {
                     OpAS::Add => a + b,
@@ -115,11 +106,11 @@ impl ExprAS {
 }
 
 impl ExprMDR {
-    fn eval(&self, cb: &mut Codebase, visited: &mut Visited) -> EvalResult<Value> {
-        let mut val = self.left.data.eval(cb, visited)?;
+    fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+        let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             let op = right.op.data;
-            let right = right.expr.data.eval(cb, visited)?;
+            let right = right.expr.data.eval(cb, caller)?;
             val = match (val, right) {
                 (Value::Num(a), Value::Num(b)) => Value::Num(match op {
                     OpMDR::Mul => a * b,
@@ -134,9 +125,9 @@ impl ExprMDR {
 }
 
 impl ExprCall {
-    fn eval(&self, cb: &mut Codebase, visited: &mut Visited) -> EvalResult<Value> {
-        let term = self.term.eval(cb, visited)?;
-        Ok(if let Some(args) = &self.args {
+    fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+        let term = self.term.eval(cb, caller)?;
+        if let Some(args) = &self.args {
             let function = if let Value::Function(f) = &term {
                 f
             } else {
@@ -147,31 +138,36 @@ impl ExprCall {
             };
             let mut arg_vals = Vec::with_capacity(args.len());
             for arg in args {
-                arg_vals.push(arg.eval(cb, visited)?);
+                arg_vals.push(arg.eval(cb, caller)?);
             }
             let mut function_cb = Codebase::default();
             for (name, val) in function.args.iter().zip(arg_vals) {
                 function_cb.insert_val(name.clone(), val);
             }
             cb.push(function_cb);
-            let mut visited = Visited::new();
-            let ret = function.body.eval(cb, &mut visited)?;
+            let ret = function.body.eval(cb, caller);
             cb.pop();
             ret
         } else {
-            term
-        })
+            Ok(term)
+        }
     }
 }
 
 impl Term {
-    fn eval(&self, cb: &mut Codebase, visited: &mut Visited) -> EvalResult<Value> {
+    fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
         Ok(match self {
-            Term::Expr(expr) => expr.eval(cb, visited)?,
+            Term::Expr(expr) => expr.eval(cb, caller)?,
             Term::Bool(b) => Value::Bool(*b),
             Term::Num(n) => Value::Num(*n),
             Term::Nil => Value::Nil,
-            Term::Ident(ident) => eval_rec(ident, cb, visited)?,
+            Term::Ident(ident) => {
+                if ident == caller {
+                    return Err(EvalError::RecursiveValue(ident.clone()));
+                } else {
+                    eval_rec(ident, cb, caller)?
+                }
+            }
             Term::String(s) => Value::String(s.clone()),
             Term::Function(f) => Value::Function(f.clone()),
         })

@@ -67,12 +67,14 @@ impl Codebase {
     pub fn unassign_results(&mut self, ident: &str) {
         let mut idents = vec![ident.to_owned()];
         while !idents.is_empty() {
-            for ident in idents.drain(..).collect::<Vec<_>>() {
+            for child in idents.drain(..).collect::<Vec<_>>() {
                 for (id, evald) in &mut self.vals {
-                    if let Some(expr) = &evald.expr {
-                        if expr.contains_ident(&ident) {
-                            evald.res = None;
-                            idents.push(id.clone());
+                    if child != ident {
+                        if let Some(expr) = &evald.expr {
+                            if expr.contains_ident(&child) {
+                                evald.res = None;
+                                idents.push(id.clone());
+                            }
                         }
                     }
                 }

@@ -517,6 +517,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 impl Path {
     pub const GLOBAL: Self = Path {
         disam: Vec::new(),
