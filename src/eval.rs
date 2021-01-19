@@ -14,13 +14,13 @@ pub enum EvalError {
     CallNonFunction { expr: String, ty: Type },
 }
 
-pub type EvalResult<T> = Result<T, EvalError>;
+pub type EvalResult = Result<Value, EvalError>;
 
-pub fn eval(cb: &mut Codebase, ident: &str) -> EvalResult<Value> {
+pub fn eval(cb: &mut Codebase, ident: &str) -> EvalResult {
     eval_rec(ident, cb, ident)
 }
 
-pub fn eval_rec(ident: &str, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+pub fn eval_rec(ident: &str, cb: &mut Codebase, caller: &str) -> EvalResult {
     Ok(if let Some(Evald { expr, res }) = cb.get(ident) {
         if let Some(Ok(val)) = res {
             val.clone()
@@ -35,7 +35,7 @@ pub fn eval_rec(ident: &str, cb: &mut Codebase, caller: &str) -> EvalResult<Valu
 }
 
 impl ExprOr {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             val = if val.is_truth() {
@@ -49,7 +49,7 @@ impl ExprOr {
 }
 
 impl ExprAnd {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             val = if val.is_truth() {
@@ -63,7 +63,7 @@ impl ExprAnd {
 }
 
 impl ExprCmp {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             let op = right.op.data;
@@ -88,7 +88,7 @@ impl ExprCmp {
 }
 
 impl ExprAS {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             let op = right.op.data;
@@ -106,7 +106,7 @@ impl ExprAS {
 }
 
 impl ExprMDR {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             let op = right.op.data;
@@ -125,15 +125,15 @@ impl ExprMDR {
 }
 
 impl ExprCall {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
-        let term = self.term.eval(cb, caller)?;
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
+        let fexpr = self.fexpr.eval(cb, caller)?;
         if let Some(args) = &self.args {
-            let function = if let Value::Function(f) = &term {
+            let function = if let Value::Function(f) = &fexpr {
                 f
             } else {
                 return Err(EvalError::CallNonFunction {
-                    expr: self.term.to_string(),
-                    ty: term.ty(),
+                    expr: self.fexpr.to_string(),
+                    ty: fexpr.ty(),
                 });
             };
             let mut arg_vals = Vec::with_capacity(args.len());
@@ -149,13 +149,23 @@ impl ExprCall {
             cb.pop();
             ret
         } else {
-            Ok(term)
+            Ok(fexpr)
         }
     }
 }
 
+impl ExprNot {
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
+        let mut val = self.expr.eval(cb, caller)?;
+        for _ in 0..self.count {
+            val = Value::Bool(!val.is_truth());
+        }
+        Ok(val)
+    }
+}
+
 impl Term {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
         Ok(match self {
             Term::Expr(expr) => expr.eval(cb, caller)?,
             Term::Bool(b) => Value::Bool(*b),

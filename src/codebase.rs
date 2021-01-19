@@ -103,7 +103,7 @@ impl Codebase {
 #[derive(Debug, Clone)]
 pub struct Evald {
     pub expr: Option<Expression>,
-    pub res: Option<EvalResult<Value>>,
+    pub res: Option<EvalResult>,
 }
 
 impl Evald {

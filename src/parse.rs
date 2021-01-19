@@ -301,8 +301,8 @@ impl Tokens {
         Ok(span.sp(ExprMDR { left, rights }))
     }
     pub fn expr_call(&mut self) -> Parse<ExprCall> {
-        let term = self.term()?;
-        let mut end = term.span.end;
+        let fexpr = self.expr_not()?;
+        let mut end = fexpr.span.end;
         let args = if self.matches(Token::OpenParen) {
             let mut args = Vec::new();
             while !self.matches(Token::CloseParen) {
@@ -318,10 +318,27 @@ impl Tokens {
         } else {
             None
         };
-        Ok(term.span.start.to(end).sp(ExprCall {
-            term: term.data,
+        Ok(fexpr.span.start.to(end).sp(ExprCall {
+            fexpr: fexpr.data,
             args,
         }))
+    }
+    pub fn expr_not(&mut self) -> Parse<ExprNot> {
+        let mut count = 0;
+        let mut start = None;
+        while let Some(not) = self.take_if(Token::Not) {
+            start = Some(not.span.start);
+            count += 1;
+        }
+        let term = self.term()?;
+        Ok(start
+            .unwrap_or(term.span.start)
+            .to(term.span.end)
+            .sp(ExprNot {
+                op: OpNot,
+                count,
+                expr: term.data,
+            }))
     }
     pub fn term(&mut self) -> Parse<Term> {
         Ok(if self.matches(Token::OpenParen) {
@@ -380,9 +397,9 @@ pub struct Assignment {
     "left.data",
     r#"rights.iter().map(|r| { format!(" {} {}", r.op.data, r.expr.data) }).collect::<String>()"#
 )]
-pub struct BinExpr<T, O> {
+pub struct BinExpr<O, T> {
     pub left: Sp<T>,
-    pub rights: Vec<Right<T, O>>,
+    pub rights: Vec<Right<O, T>>,
 }
 
 pub trait Node {
@@ -390,7 +407,7 @@ pub trait Node {
     fn terms(&self) -> usize;
 }
 
-impl<T, O> Node for BinExpr<T, O>
+impl<O, T> Node for BinExpr<O, T>
 where
     T: Node,
 {
@@ -412,14 +429,38 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Right<T, O> {
+pub struct Right<O, T> {
     pub op: Sp<O>,
     pub expr: Sp<T>,
 }
 
-impl<T, O> Right<T, O> {
+impl<O, T> Right<O, T> {
     fn new(op: Sp<O>, expr: Sp<T>) -> Self {
         Right { op, expr }
+    }
+}
+
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[display(
+    fmt = "{}{}",
+    r#"(0..*count).map(|_| "not ").collect::<String>()"#,
+    expr
+)]
+pub struct UnOp<O, T> {
+    pub op: O,
+    pub count: usize,
+    pub expr: T,
+}
+
+impl<O, T> Node for UnOp<O, T>
+where
+    T: Node,
+{
+    fn contains_ident(&self, ident: &str) -> bool {
+        self.expr.contains_ident(ident)
+    }
+    fn terms(&self) -> usize {
+        self.expr.terms()
     }
 }
 
@@ -429,6 +470,9 @@ pub struct OpOr;
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[display(fmt = "and")]
 pub struct OpAnd;
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[display(fmt = "and")]
+pub struct OpNot;
 
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OpCmp {
@@ -465,40 +509,42 @@ pub enum OpMDR {
 }
 
 pub type Expression = ExprOr;
-pub type ExprOr = BinExpr<ExprAnd, OpOr>;
-pub type ExprAnd = BinExpr<ExprCmp, OpAnd>;
-pub type ExprCmp = BinExpr<ExprAS, OpCmp>;
-pub type ExprAS = BinExpr<ExprMDR, OpAS>;
-pub type ExprMDR = BinExpr<ExprCall, OpMDR>;
+pub type ExprOr = BinExpr<OpOr, ExprAnd>;
+pub type ExprAnd = BinExpr<OpAnd, ExprCmp>;
+pub type ExprCmp = BinExpr<OpCmp, ExprAS>;
+pub type ExprAS = BinExpr<OpAS, ExprMDR>;
+pub type ExprMDR = BinExpr<OpMDR, ExprCall>;
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[display(
     fmt = "{}{}",
-    term,
+    fexpr,
     r#"args.as_ref().map(
         |args| format!("({})", args.iter().map(ToString::to_string).intersperse(", ".into()).collect::<String>())
     ).unwrap_or_default()"#
 )]
 pub struct ExprCall {
-    pub term: Term,
+    pub fexpr: ExprNot,
     pub args: Option<Vec<Expression>>,
 }
 
 impl Node for ExprCall {
     fn contains_ident(&self, ident: &str) -> bool {
-        self.term.contains_ident(ident)
+        self.fexpr.contains_ident(ident)
             || self.args.as_ref().map_or(false, |args| {
                 args.iter().any(|arg| arg.contains_ident(ident))
             })
     }
     fn terms(&self) -> usize {
-        self.term.terms()
+        self.fexpr.terms()
             + self
                 .args
                 .as_ref()
                 .map_or(0, |args| args.iter().map(Node::terms).sum())
     }
 }
+
+pub type ExprNot = UnOp<OpNot, Term>;
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[display(

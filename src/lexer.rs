@@ -28,6 +28,7 @@ pub enum Token {
     Fn,
     Period,
     Comma,
+    Not,
 }
 
 impl Display for Token {
@@ -52,6 +53,7 @@ impl Display for Token {
             Token::Fn => "fn".fmt(f),
             Token::Period => '.'.fmt(f),
             Token::Comma => ','.fmt(f),
+            Token::Not => "not".fmt(f),
         }
     }
 }
@@ -127,6 +129,7 @@ fn command_pattern() -> impl Pattern<Token = Token> {
         .or("isnt".is(Token::Cmp(OpCmp::Isnt)))
         .or("is".is(Token::Cmp(OpCmp::Is)))
         .or("fn".is(Token::Fn))
+        .or("not".is(Token::Not))
         // Ident
         .or(ident_pattern())
 }
