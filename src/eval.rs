@@ -35,7 +35,7 @@ pub fn eval_rec(ident: &str, cb: &mut Codebase, caller: &str) -> EvalResult<Valu
 }
 
 impl ExprOr {
-    fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             val = if val.is_truth() {
@@ -49,7 +49,7 @@ impl ExprOr {
 }
 
 impl ExprAnd {
-    fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             val = if val.is_truth() {
@@ -63,7 +63,7 @@ impl ExprAnd {
 }
 
 impl ExprCmp {
-    fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             let op = right.op.data;
@@ -88,7 +88,7 @@ impl ExprCmp {
 }
 
 impl ExprAS {
-    fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             let op = right.op.data;
@@ -106,7 +106,7 @@ impl ExprAS {
 }
 
 impl ExprMDR {
-    fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             let op = right.op.data;
@@ -125,7 +125,7 @@ impl ExprMDR {
 }
 
 impl ExprCall {
-    fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
         let term = self.term.eval(cb, caller)?;
         if let Some(args) = &self.args {
             let function = if let Value::Function(f) = &term {
@@ -155,7 +155,7 @@ impl ExprCall {
 }
 
 impl Term {
-    fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
+    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult<Value> {
         Ok(match self {
             Term::Expr(expr) => expr.eval(cb, caller)?,
             Term::Bool(b) => Value::Bool(*b),

@@ -48,6 +48,14 @@ fn handle_input(input: &str, cb: &mut Codebase, eval: bool) {
                 }
                 Err(_) => println!("Unable to open file with path {}", path),
             },
+            Command::Eval(expr) => {
+                println!();
+                match expr.eval(cb, "") {
+                    Ok(val) => println!("{}", val),
+                    Err(e) => println!("{}", e.to_string().red()),
+                }
+                println!();
+            }
         },
         Err(e) => println!("Error: {}\n", e),
     }

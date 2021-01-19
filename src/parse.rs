@@ -57,6 +57,7 @@ impl<'a> TokenPattern for &'a str {
 pub enum Command {
     Assignment(Assignment),
     Load(Path),
+    Eval(Expression),
 }
 
 struct Tokens {
@@ -127,9 +128,11 @@ impl Tokens {
     pub fn command(&mut self) -> Parse<Command> {
         if let Some(ass) = self.assigment()? {
             Ok(ass.map(Command::Assignment))
-        } else if self.ident()?.filter(|s| s.data == "load").is_some() {
+        } else if self.matches(Token::Ident("load".into())) {
             let path = self.require(Self::path, "path")?;
             Ok(path.map(Command::Load))
+        } else if let Ok(expr) = self.expression() {
+            Ok(expr.map(Command::Eval))
         } else {
             Err(ParseError::InvalidCommand)
         }
