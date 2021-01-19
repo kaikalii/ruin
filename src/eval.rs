@@ -7,21 +7,23 @@ pub enum EvalError {
     #[display(fmt = "Attempted to perform arithmetic on {} value", _0)]
     Math(Type),
     #[display(fmt = "Recursive value detected: {:?}", _0)]
-    RecursiveValue(String),
+    RecursiveValue(Path),
     #[display(fmt = "Unknown value \"{}\"", _0)]
-    UnknownValue(String),
+    UnknownValue(Path),
     #[display(fmt = "Attempted to call {}, a {} value", expr, ty)]
     CallNonFunction { expr: String, ty: Type },
+    #[display(fmt = "Cannot assign member of {}, a {} value", expr, ty)]
+    CantAssign { expr: String, ty: Type },
 }
 
 pub type EvalResult = Result<Value, EvalError>;
 
-pub fn eval(cb: &mut Codebase, ident: &str) -> EvalResult {
-    eval_rec(ident, cb, ident)
+pub fn eval(cb: &mut Codebase, path: &Path) -> EvalResult {
+    eval_rec(path, cb, path)
 }
 
-pub fn eval_rec(ident: &str, cb: &mut Codebase, caller: &str) -> EvalResult {
-    Ok(if let Some(Evald { expr, res }) = cb.get(ident) {
+pub fn eval_rec(path: &Path, cb: &mut Codebase, caller: &Path) -> EvalResult {
+    Ok(if let Some(Evald { expr, res }) = cb.get(path) {
         if let Some(Ok(val)) = res {
             val.clone()
         } else if let Some(expr) = expr {
@@ -30,12 +32,12 @@ pub fn eval_rec(ident: &str, cb: &mut Codebase, caller: &str) -> EvalResult {
             panic!("Invalid evald configuration")
         }
     } else {
-        return Err(EvalError::UnknownValue(ident.into()));
+        return Err(EvalError::UnknownValue(path.clone()));
     })
 }
 
 impl ExprOr {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
+    pub fn eval(&self, cb: &mut Codebase, caller: &Path) -> EvalResult {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             val = if val.is_truth() {
@@ -49,7 +51,7 @@ impl ExprOr {
 }
 
 impl ExprAnd {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
+    pub fn eval(&self, cb: &mut Codebase, caller: &Path) -> EvalResult {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             val = if val.is_truth() {
@@ -63,7 +65,7 @@ impl ExprAnd {
 }
 
 impl ExprCmp {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
+    pub fn eval(&self, cb: &mut Codebase, caller: &Path) -> EvalResult {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             let op = right.op.data;
@@ -88,7 +90,7 @@ impl ExprCmp {
 }
 
 impl ExprAS {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
+    pub fn eval(&self, cb: &mut Codebase, caller: &Path) -> EvalResult {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             let op = right.op.data;
@@ -106,7 +108,7 @@ impl ExprAS {
 }
 
 impl ExprMDR {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
+    pub fn eval(&self, cb: &mut Codebase, caller: &Path) -> EvalResult {
         let mut val = self.left.data.eval(cb, caller)?;
         for right in &self.rights {
             let op = right.op.data;
@@ -125,7 +127,7 @@ impl ExprMDR {
 }
 
 impl ExprCall {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
+    pub fn eval(&self, cb: &mut Codebase, caller: &Path) -> EvalResult {
         let fexpr = self.fexpr.eval(cb, caller)?;
         if let Some(args) = &self.args {
             let function = if let Value::Function(f) = &fexpr {
@@ -142,10 +144,10 @@ impl ExprCall {
             }
             let mut function_cb = Codebase::default();
             for (name, val) in function.args.iter().zip(arg_vals) {
-                function_cb.insert_val(name.clone(), val);
+                function_cb.insert_val(name.into(), val);
             }
             for (ident, expr) in &function.env {
-                function_cb.insert(ident.clone(), expr.clone())
+                function_cb.insert(ident.into(), expr.clone())
             }
             cb.push(function_cb);
             let ret = function.body.eval(cb, caller);
@@ -158,7 +160,7 @@ impl ExprCall {
 }
 
 impl ExprNot {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
+    pub fn eval(&self, cb: &mut Codebase, caller: &Path) -> EvalResult {
         let mut val = self.expr.eval(cb, caller)?;
         for _ in 0..self.count {
             val = Value::Bool(!val.is_truth());
@@ -168,17 +170,17 @@ impl ExprNot {
 }
 
 impl Term {
-    pub fn eval(&self, cb: &mut Codebase, caller: &str) -> EvalResult {
+    pub fn eval(&self, cb: &mut Codebase, caller: &Path) -> EvalResult {
         Ok(match self {
             Term::Expr(expr) => expr.eval(cb, caller)?,
             Term::Bool(b) => Value::Bool(*b),
             Term::Num(n) => Value::Num(*n),
             Term::Nil => Value::Nil,
             Term::Ident(ident) => {
-                if ident == caller {
-                    return Err(EvalError::RecursiveValue(ident.clone()));
+                if caller.name.as_ref().map_or(false, |name| name == ident) {
+                    return Err(EvalError::RecursiveValue(ident.into()));
                 } else {
-                    eval_rec(ident, cb, caller)?
+                    eval_rec(&ident.into(), cb, caller)?
                 }
             }
             Term::String(s) => Value::String(s.clone()),

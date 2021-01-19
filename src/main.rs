@@ -34,7 +34,7 @@ fn handle_input(input: &str, cb: &mut Codebase, eval: bool) {
     match parse(input.as_bytes()) {
         Ok(command) => match command {
             Command::Assignment(ass) => {
-                cb.insert(ass.ident, ass.expr);
+                cb.insert(ass.path, ass.expr);
                 if eval {
                     cb.eval_all();
                     cb.print(10);
@@ -60,7 +60,7 @@ fn handle_input(input: &str, cb: &mut Codebase, eval: bool) {
             }
             Command::Eval(expr) => {
                 println!();
-                match expr.eval(cb, "") {
+                match expr.eval(cb, &Path::GLOBAL) {
                     Ok(val) => println!("{}", val),
                     Err(e) => println!("{}", e.to_string().red()),
                 }

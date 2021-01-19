@@ -8,7 +8,7 @@ use crate::{eval::*, parse::*, value::Value};
 #[derive(Debug, Clone, Default)]
 pub struct Codebase {
     pub parent: Option<Rc<Self>>,
-    pub vals: IndexMap<String, Evald>,
+    pub vals: IndexMap<Path, Evald>,
 }
 
 impl Codebase {
@@ -21,27 +21,32 @@ impl Codebase {
         std::mem::swap(self, &mut parent);
         parent
     }
-    pub fn get(&self, ident: &str) -> Option<&Evald> {
+    pub fn get(&self, path: &Path) -> Option<&Evald> {
         self.vals
-            .get(ident)
-            .or_else(|| self.parent.as_ref().and_then(|parent| parent.get(ident)))
+            .get(path)
+            .or_else(|| self.parent.as_ref().and_then(|parent| parent.get(path)))
     }
-    pub fn insert(&mut self, ident: String, expr: Expression) {
-        // Unassign results that depend on the ident
-        self.unassign_results(&ident);
+    pub fn get_ident(&self, ident: &str) -> Option<&Evald> {
+        let path: Path = ident.into();
+        self.get(&path)
+            .or_else(|| self.parent.as_ref().and_then(|parent| parent.get(&path)))
+    }
+    pub fn insert(&mut self, path: Path, expr: Expression) {
+        // Unassign results that depend on the path
+        self.unassign_results(&path);
         // Insert
-        self.vals.remove(&ident);
+        self.vals.remove(&path);
         self.vals.insert(
-            ident,
+            path,
             Evald {
                 expr: Some(expr),
                 res: None,
             },
         );
     }
-    pub fn insert_val(&mut self, ident: String, val: Value) {
+    pub fn insert_val(&mut self, path: Path, val: Value) {
         self.vals.insert(
-            ident,
+            path,
             Evald {
                 expr: None,
                 res: Some(Ok(val)),
@@ -53,8 +58,8 @@ impl Codebase {
         if n < self.vals.len() {
             println!("...");
         }
-        for (ident, evald) in self.vals.iter().rev().take(n).rev() {
-            println!("{} = {}", ident.to_string().bold(), evald.format())
+        for (path, evald) in self.vals.iter().rev().take(n).rev() {
+            println!("{} = {}", path.to_string().bold(), evald.format())
         }
         println!();
     }
@@ -64,16 +69,16 @@ impl Codebase {
             .filter(|val| val.res.as_ref().map_or(false, |res| res.is_ok()))
             .count()
     }
-    pub fn unassign_results(&mut self, ident: &str) {
-        let mut idents = vec![ident.to_owned()];
-        while !idents.is_empty() {
-            for child in idents.drain(..).collect::<Vec<_>>() {
+    pub fn unassign_results(&mut self, path: &Path) {
+        let mut paths = vec![path.to_owned()];
+        while !paths.is_empty() {
+            for child in paths.drain(..).collect::<Vec<_>>() {
                 for (id, evald) in &mut self.vals {
-                    if child != ident {
+                    if &child != path {
                         if let Some(expr) = &evald.expr {
-                            if expr.contains_ident(&child) {
+                            if expr.contains_ident(path.name.as_ref().unwrap()) {
                                 evald.res = None;
-                                idents.push(id.clone());
+                                paths.push(id.clone());
                             }
                         }
                     }
@@ -82,14 +87,13 @@ impl Codebase {
         }
     }
     pub fn eval_all(&mut self) {
-        // Get initial count and idents
+        // Get initial count and paths
         let mut count = self.evaled_count();
-        let idents: Vec<_> = self.vals.keys().cloned().collect();
+        let paths: Vec<_> = self.vals.keys().cloned().collect();
         // Loop until the number of success counts does not change
         loop {
-            for ident in &idents {
-                let res = eval(self, ident);
-                self.vals.get_mut(ident).unwrap().res = Some(res);
+            for path in &paths {
+                self.eval_path(path);
             }
             let new_count = self.evaled_count();
             if new_count == count {
@@ -97,6 +101,16 @@ impl Codebase {
             }
             count = new_count;
         }
+    }
+    fn eval_path(&mut self, path: &Path) {
+        let res = eval(self, path);
+        if path.disam.is_empty() {
+            if let Some(evald) = self.vals.get_mut(path) {
+                evald.res = Some(res);
+                return;
+            }
+        }
+        todo!()
     }
 }
 

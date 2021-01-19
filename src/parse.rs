@@ -12,8 +12,6 @@ pub enum ParseError {
     Lex(LexError),
     #[display(fmt = "Expected {}", _0)]
     Expected(String),
-    #[display(fmt = "Invalid command")]
-    InvalidCommand,
 }
 
 impl From<LexError> for ParseError {
@@ -62,8 +60,13 @@ pub enum Command {
 
 struct Tokens {
     iter: std::vec::IntoIter<Sp<Token>>,
-    put_back: Vec<Sp<Token>>,
+    history: Vec<Sp<Token>>,
+    cursor: usize,
+    // revert_trackers: usize,
 }
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RevertHandle(usize);
 
 impl Tokens {
     pub fn new<R>(input: R) -> LexResult<Self>
@@ -72,21 +75,44 @@ impl Tokens {
     {
         Ok(Tokens {
             iter: lex(input)?.into_iter(),
-            put_back: Vec::new(),
+            history: Vec::new(),
+            cursor: 0,
+            // revert_trackers: 0,
         })
     }
     pub fn take(&mut self) -> Option<Sp<Token>> {
-        self.put_back.pop().or_else(|| self.iter.next())
+        let token = if self.cursor < self.history.len() {
+            Some(&self.history[self.cursor])
+        } else if let Some(token) = self.iter.next() {
+            self.history.push(token);
+            self.history.last()
+        } else {
+            None
+        };
+        if let Some(token) = token {
+            self.cursor += 1;
+            Some(token.clone())
+        } else {
+            None
+        }
+    }
+    #[allow(dead_code)]
+    pub fn peek(&mut self) -> Option<&Sp<Token>> {
+        if self.cursor == self.history.len() {
+            self.take()?;
+            self.put_back();
+        }
+        self.history.get(self.cursor)
     }
     pub fn take_as<F, T>(&mut self, f: F) -> Option<Sp<T>>
     where
-        F: Fn(Token) -> Result<T, Token>,
+        F: Fn(&Token) -> Option<T>,
     {
         if let Some(sp_token) = self.take() {
-            match f(sp_token.data) {
-                Ok(val) => Some(sp_token.span.sp(val)),
-                Err(token) => {
-                    self.put_back.push(sp_token.span.sp(token));
+            match f(&sp_token.data) {
+                Some(val) => Some(sp_token.span.sp(val)),
+                None => {
+                    self.put_back();
                     None
                 }
             }
@@ -94,20 +120,35 @@ impl Tokens {
             None
         }
     }
-    pub fn put_back(&mut self, token: Sp<Token>) {
-        self.put_back.push(token);
+    fn put_back(&mut self) {
+        self.cursor -= 1;
+    }
+    pub fn track(&mut self) -> RevertHandle {
+        // self.revert_trackers += 1;
+        RevertHandle(self.cursor)
+    }
+    pub fn revert(&mut self, handle: RevertHandle) {
+        self.cursor = handle.0;
+        // self.revert_trackers -= 1;
+        // if self.revert_trackers == 0 {
+        //     self.cursor = 0;
+        //     self.history.clear();
+        // }
     }
     pub fn take_if<P>(&mut self, pattern: P) -> Option<Sp<Token>>
     where
         P: TokenPattern,
     {
-        self.take_as(|token| {
-            if pattern.matches(&token) {
-                Ok(token)
+        if let Some(token) = self.take() {
+            if pattern.matches(&token.data) {
+                Some(token)
             } else {
-                Err(token)
+                self.put_back();
+                None
             }
-        })
+        } else {
+            None
+        }
     }
     pub fn matches_as<P, T>(&mut self, pattern: P, val: T) -> Option<Sp<T>>
     where
@@ -134,87 +175,91 @@ impl Tokens {
     {
         f(self).and_then(|op| op.ok_or_else(|| ParseError::Expected(name.into())))
     }
-    pub fn command(&mut self) -> Result<Command, ParseError> {
-        if let Some(ass) = self.assigment()? {
-            Ok(Command::Assignment(ass.data))
-        } else if self.matches(Token::Slash) {
-            Ok(Command::Command)
-        } else if let Ok(expr) = self.expression() {
-            Ok(Command::Eval(expr.data))
-        } else {
-            Err(ParseError::InvalidCommand)
-        }
-    }
     pub fn ident(&mut self) -> MaybeParse<String> {
         Ok(self.take_as(|token| {
             if let Token::Ident(s) = token {
-                Ok(s)
+                Some(s.clone())
             } else {
-                Err(token)
+                None
             }
         }))
     }
     pub fn string_literal(&mut self) -> MaybeParse<String> {
         Ok(self.take_as(|token| {
             if let Token::String(s) = token {
-                Ok(s)
+                Some(s.clone())
             } else {
-                Err(token)
+                None
             }
         }))
     }
     pub fn num(&mut self) -> MaybeParse<Num> {
         Ok(self.take_as(|token| {
             if let Token::Num(num) = token {
-                Ok(num)
+                Some(*num)
             } else {
-                Err(token)
+                None
             }
         }))
     }
     pub fn boolean(&mut self) -> MaybeParse<bool> {
         Ok(self.take_as(|token| {
             if let Token::Bool(b) = token {
-                Ok(b)
+                Some(*b)
             } else {
-                Err(token)
+                None
             }
         }))
     }
     pub fn cmp(&mut self) -> MaybeParse<OpCmp> {
         Ok(self.take_as(|token| {
             if let Token::Cmp(cmp) = token {
-                Ok(cmp)
+                Some(*cmp)
             } else {
-                Err(token)
+                None
             }
         }))
     }
     pub fn path(&mut self) -> MaybeParse<Path> {
-        Ok(if let Some(name) = self.ident()? {
-            let mut end = name.span.end;
-            let mut disam = Vec::new();
-            while let Some(ident) = self.ident()? {
-                disam.push(ident.data);
-                end = ident.span.end;
+        let mut idents = Vec::new();
+        let mut start = None;
+        let mut end = None;
+        while let Some(ident) = self.ident()? {
+            start.get_or_insert(ident.span.start);
+            end = Some(ident.span.end);
+            idents.push(ident.data);
+            if !self.matches(Token::Period) {
+                break;
             }
-            Some(name.span.start.to(end).sp(Path::new(disam, name.data)))
+        }
+        Ok(if let Some(name) = idents.pop() {
+            Some(start.unwrap().to(end.unwrap()).sp(Path::new(idents, name)))
         } else {
             None
         })
     }
+    pub fn command(&mut self) -> Result<Command, ParseError> {
+        if let Some(ass) = self.assigment()? {
+            Ok(Command::Assignment(ass.data))
+        } else if self.matches(Token::Slash) {
+            Ok(Command::Command)
+        } else {
+            self.expression().map(|expr| Command::Eval(expr.data))
+        }
+    }
     pub fn assigment(&mut self) -> MaybeParse<Assignment> {
-        let ident = if let Some(ident) = self.ident()? {
-            ident
+        let tracker = self.track();
+        let path = if let Some(path) = self.path()? {
+            path
         } else {
             return Ok(None);
         };
         if !self.matches(Token::Equals) {
-            self.put_back(ident.map(Token::Ident));
+            self.revert(tracker);
             return Ok(None);
         }
         let expr = self.expression()?;
-        let ass = ident.join(expr, |ident, expr| Assignment { ident, expr });
+        let ass = path.join(expr, |path, expr| Assignment { path, expr });
         Ok(Some(ass))
     }
     pub fn expression(&mut self) -> Parse<Expression> {
@@ -308,6 +353,14 @@ impl Tokens {
         };
         Ok(span.sp(ExprMDR { left, rights }))
     }
+    #[allow(dead_code)]
+    fn dbg(&self, line: u32) {
+        print!("{}: ", line);
+        for token in &self.history {
+            print!("{} ", token.data);
+        }
+        println!("{}", self.cursor);
+    }
     pub fn expr_call(&mut self) -> Parse<ExprCall> {
         let fexpr = self.expr_not()?;
         let mut end = fexpr.span.end;
@@ -393,9 +446,9 @@ impl Tokens {
 }
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
-#[display(fmt = "{} = {}", "ident.bright_white()", expr)]
+#[display(fmt = "{} = {}", "path.to_string().bright_white()", expr)]
 pub struct Assignment {
-    pub ident: String,
+    pub path: Path,
     pub expr: Expression,
 }
 
@@ -555,7 +608,7 @@ impl Node for ExprCall {
 
 pub type ExprNot = UnOp<OpNot, Term>;
 
-#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[display(
     fmt = "{}{}",
     r#"disam.iter().map(|s| format!("{}.", s)).collect::<String>()"#,
@@ -608,6 +661,14 @@ impl Path {
         path.extend(&self.disam);
         path.extend(&self.name);
         path.with_extension("ruin")
+    }
+    pub fn parent(&self) -> Option<Self> {
+        let mut disam = self.disam.clone();
+        if let Some(name) = disam.pop() {
+            Some(Path::new(disam, name))
+        } else {
+            None
+        }
     }
 }
 
