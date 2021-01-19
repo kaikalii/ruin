@@ -703,7 +703,7 @@ impl Node for Term {
         match self {
             Term::Expr(expr) => expr.contains_ident(ident),
             Term::Ident(p) => p == ident,
-            Term::Function(f) => f.body.contains_ident(ident) && !f.args.iter().any(|i| i == ident),
+            Term::Function(f) => f.contains_ident(ident),
             _ => false,
         }
     }

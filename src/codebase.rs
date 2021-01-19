@@ -8,7 +8,7 @@ use crate::{eval::*, parse::*, value::*};
 #[derive(Debug, Clone, Default)]
 pub struct Codebase {
     pub parent: Option<Rc<Self>>,
-    pub vals: IndexMap<Path, Evald>,
+    pub vals: IndexMap<Path, Value>,
 }
 
 impl Codebase {
@@ -21,60 +21,47 @@ impl Codebase {
         std::mem::swap(self, &mut parent);
         parent
     }
-    pub fn get(&self, path: &Path) -> Option<&Evald> {
+    pub fn get(&self, path: &Path) -> Option<&Value> {
         self.vals
             .get(path)
             .or_else(|| self.parent.as_ref().and_then(|parent| parent.get(path)))
     }
-    pub fn insert(&mut self, path: Path, expr: Expression) {
+    pub fn insert<V>(&mut self, path: Path, val: V)
+    where
+        V: Into<Value>,
+    {
         // Unassign results that depend on the path
         self.unassign_results(&path);
         // Insert
         self.vals.remove(&path);
-        self.vals.insert(
-            path,
-            Evald {
-                expr: Some(expr),
-                res: None,
-            },
-        );
-    }
-    pub fn insert_val(&mut self, path: Path, val: Value) {
-        self.vals.insert(
-            path,
-            Evald {
-                expr: None,
-                res: Some(Ok(val)),
-            },
-        );
+        self.vals.insert(path, val.into());
     }
     pub fn print(&self, n: usize) {
         println!();
         if n < self.vals.len() {
             println!("...");
         }
-        for (path, evald) in self.vals.iter().rev().take(n).rev() {
-            println!("{} = {}", path.to_string().bold(), evald.format())
+        for (path, val) in self.vals.iter().rev().take(n).rev() {
+            println!("{} = {}", path.to_string().bold(), val)
         }
         println!();
     }
     pub fn evaled_count(&self) -> usize {
         self.vals
             .values()
-            .filter(|val| val.res.as_ref().map_or(false, |res| res.is_ok()))
+            .filter(|val| !val.is_err() && val.is_evald())
             .count()
     }
     pub fn unassign_results(&mut self, path: &Path) {
         let mut paths = vec![path.to_owned()];
         while !paths.is_empty() {
             for child in paths.drain(..).collect::<Vec<_>>() {
-                for (id, evald) in &mut self.vals {
-                    if &child != path {
-                        if let Some(expr) = &evald.expr {
-                            if expr.contains_ident(path.name.as_ref().unwrap()) {
-                                evald.res = None;
-                                paths.push(id.clone());
-                            }
+                for (id, val) in &mut self.vals {
+                    let ident = path.name.as_ref().unwrap();
+                    if val.contains_ident(ident) {
+                        val.reset();
+                        if &child != path {
+                            paths.push(id.clone());
                         }
                     }
                 }
@@ -98,81 +85,38 @@ impl Codebase {
         }
     }
     fn eval_path(&mut self, path: &Path) {
-        let res = eval(self, path);
-        if let Some(evald) = self.vals.get_mut(path) {
-            evald.res = Some(res);
+        let evald = eval(self, path);
+        if let Some(val) = self.vals.get_mut(path) {
+            if let Value::Expression { val, .. } = val {
+                *val = Some(evald.into());
+            }
         }
         if !path.disam.is_empty() {
             if let Some(parent) = path.parent() {
                 self.eval_path(&parent);
-                if let Some(evald) = self.vals.get(path) {
-                    let val = evald
-                        .res
-                        .as_ref()
-                        .map(|r| r.as_ref().map(Clone::clone).map_err(ToString::to_string));
-                    if let Some(expr) = evald.expr.clone() {
-                        if let Some(evald) = self.vals.get_mut(&parent) {
-                            if let Some(res) = &mut evald.res {
-                                match res {
-                                    Ok(Value::Function(function)) => {
-                                        let function = Rc::make_mut(function);
-                                        function.env =
-                                            function.env.insert(path.name.clone().unwrap(), expr);
-                                    }
-                                    Ok(Value::Table(table)) => {
-                                        if let Some(Ok(val)) = val {
-                                            *table = table.insert(
-                                                Key::String(path.name.clone().unwrap()),
-                                                val,
-                                            );
-                                        }
-                                    }
-                                    Ok(val) => {
-                                        let ty = val.ty();
-                                        let expr = evald
-                                            .expr
-                                            .as_ref()
-                                            .map(ToString::to_string)
-                                            .unwrap_or_else(|| val.to_string());
-                                        self.vals.get_mut(path).unwrap().res =
-                                            Some(Err(EvalError::CantAssign { expr, ty }));
-                                    }
-                                    _ => {}
-                                }
+                if let Some(child_val) = self.vals.get(path).cloned() {
+                    if let Some(parent_val) = self.vals.get_mut(&parent) {
+                        match parent_val {
+                            Value::Function(function) => {
+                                let function = Rc::make_mut(function);
+                                function.env =
+                                    function.env.insert(path.name.clone().unwrap(), child_val);
+                            }
+
+                            Value::Table(table) => {
+                                *table = table
+                                    .insert(Key::String(path.name.clone().unwrap()), child_val);
+                            }
+                            parent_val => {
+                                let ty = parent_val.ty();
+                                let expr = parent_val.to_string();
+                                *self.vals.get_mut(path).unwrap() =
+                                    Err(EvalError::CantAssign { expr, ty }).into();
                             }
                         }
                     }
                 }
             }
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Evald {
-    pub expr: Option<Expression>,
-    pub res: Option<EvalResult>,
-}
-
-impl Evald {
-    pub fn format(&self) -> String {
-        let expr = self
-            .expr
-            .as_ref()
-            .map(ToString::to_string)
-            .unwrap_or_default();
-        match &self.res {
-            Some(Ok(val)) => {
-                let val = val.to_string();
-                if val == expr {
-                    val
-                } else {
-                    format!("{} = {}", expr, val)
-                }
-            }
-            Some(Err(EvalError::UnknownValue(_))) => expr,
-            Some(Err(e)) => format!("{} = {}", expr, e.to_string().red()),
-            None => expr,
         }
     }
 }

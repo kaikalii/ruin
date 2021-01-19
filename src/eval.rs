@@ -8,7 +8,7 @@ use crate::{codebase::*, parse::*, value::*};
 pub enum EvalError {
     #[display(fmt = "Attempted to perform arithmetic on {} value", _0)]
     Math(Type),
-    #[display(fmt = "Recursive value detected: {:?}", _0)]
+    #[display(fmt = "Recursive value detected: {}", _0)]
     RecursiveValue(Path),
     #[display(fmt = "Unknown value \"{}\"", _0)]
     UnknownValue(Path),
@@ -20,22 +20,20 @@ pub enum EvalError {
 
 pub type EvalResult = Result<Value, EvalError>;
 
-pub fn eval(cb: &mut Codebase, path: &Path) -> EvalResult {
+pub fn eval(cb: &mut Codebase, path: &Path) -> Value {
     eval_rec(path, cb, path)
 }
 
-pub fn eval_rec(path: &Path, cb: &mut Codebase, caller: &Path) -> EvalResult {
-    Ok(if let Some(Evald { expr, res }) = cb.get(path) {
-        if let Some(Ok(val)) = res {
-            val.clone()
-        } else if let Some(expr) = expr {
-            expr.clone().eval(cb, caller)?
+pub fn eval_rec(path: &Path, cb: &mut Codebase, caller: &Path) -> Value {
+    if let Some(val) = cb.get(path).cloned() {
+        if let Value::Expression { val: None, expr } = val {
+            expr.eval(cb, caller).into()
         } else {
-            panic!("Invalid evald configuration")
+            val.as_evaluated().clone()
         }
     } else {
-        return Err(EvalError::UnknownValue(path.clone()));
-    })
+        Err(EvalError::UnknownValue(path.clone())).into()
+    }
 }
 
 impl ExprOr {
@@ -151,7 +149,7 @@ impl ExprCall {
                 .iter()
                 .zip(arg_vals.into_iter().chain(repeat(Value::Nil)))
             {
-                function_cb.insert_val(name.into(), val);
+                function_cb.insert(name.into(), val);
             }
             for (ident, expr) in &function.env {
                 function_cb.insert(ident.into(), expr.clone())
@@ -187,7 +185,7 @@ impl Term {
                 if caller.name.as_ref().map_or(false, |name| name == ident) {
                     return Err(EvalError::RecursiveValue(ident.into()));
                 } else {
-                    eval_rec(&ident.into(), cb, caller)?
+                    eval_rec(&ident.into(), cb, caller)
                 }
             }
             Term::String(s) => Value::String(s.clone()),
