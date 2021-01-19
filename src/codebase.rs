@@ -3,7 +3,7 @@ use std::rc::Rc;
 use colored::Colorize;
 use indexmap::IndexMap;
 
-use crate::{eval::*, parse::*, value::Value};
+use crate::{eval::*, parse::*, value::*};
 
 #[derive(Debug, Clone, Default)]
 pub struct Codebase {
@@ -106,6 +106,10 @@ impl Codebase {
             if let Some(parent) = path.parent() {
                 self.eval_path(&parent);
                 if let Some(evald) = self.vals.get(path) {
+                    let val = evald
+                        .res
+                        .as_ref()
+                        .map(|r| r.as_ref().map(Clone::clone).map_err(ToString::to_string));
                     if let Some(expr) = evald.expr.clone() {
                         if let Some(evald) = self.vals.get_mut(&parent) {
                             if let Some(res) = &mut evald.res {
@@ -114,6 +118,14 @@ impl Codebase {
                                         let function = Rc::make_mut(function);
                                         function.env =
                                             function.env.insert(path.name.clone().unwrap(), expr);
+                                    }
+                                    Ok(Value::Table(table)) => {
+                                        if let Some(Ok(val)) = val {
+                                            *table = table.insert(
+                                                Key::String(path.name.clone().unwrap()),
+                                                val,
+                                            );
+                                        }
                                     }
                                     Ok(val) => {
                                         let ty = val.ty();
