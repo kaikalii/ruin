@@ -8,12 +8,14 @@ mod value;
 use std::{
     fs,
     io::{stdin, stdout, BufRead, Write},
+    iter::once,
 };
 
+use clap::Clap;
 use colored::Colorize;
 
 use codebase::Codebase;
-use parse::{parse, Command};
+use parse::{parse, Command, Path};
 
 fn main() {
     color_backtrace::install();
@@ -27,6 +29,7 @@ fn main() {
 }
 
 fn handle_input(input: &str, cb: &mut Codebase, eval: bool) {
+    let input = input.trim();
     match parse(input.as_bytes()) {
         Ok(command) => match command {
             Command::Assignment(ass) => {
@@ -36,18 +39,24 @@ fn handle_input(input: &str, cb: &mut Codebase, eval: bool) {
                     cb.print(10);
                 }
             }
-            Command::Load(path) => match fs::read_to_string(path.as_path_buf()) {
-                Ok(text) => {
-                    for line in text.lines() {
-                        handle_input(line, cb, false);
-                    }
-                    if eval {
-                        cb.eval_all();
-                        cb.print(10);
-                    }
+            Command::Command => {
+                let args = once("ruin").chain(input[1..].split_whitespace());
+                match App::try_parse_from(args) {
+                    Ok(App::Load { path }) => match fs::read_to_string(path.as_path_buf()) {
+                        Ok(text) => {
+                            for line in text.lines() {
+                                handle_input(line, cb, false);
+                            }
+                            if eval {
+                                cb.eval_all();
+                                cb.print(10);
+                            }
+                        }
+                        Err(_) => println!("Unable to open file with path {}", path),
+                    },
+                    Err(e) => println!("{}", e),
                 }
-                Err(_) => println!("Unable to open file with path {}", path),
-            },
+            }
             Command::Eval(expr) => {
                 println!();
                 match expr.eval(cb, "") {
@@ -64,4 +73,9 @@ fn handle_input(input: &str, cb: &mut Codebase, eval: bool) {
 fn print_prompt() {
     print!("{}", "\r> ".bright_yellow());
     let _ = stdout().flush();
+}
+
+#[derive(Clap)]
+enum App {
+    Load { path: Path },
 }

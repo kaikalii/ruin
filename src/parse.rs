@@ -1,9 +1,9 @@
-use std::{fmt::Display as StdDisplay, io::Read, path::PathBuf};
+use std::{fmt::Display as StdDisplay, io::Read, path::PathBuf, str::FromStr};
 
 use colored::Colorize;
 use derive_more::Display;
 use itertools::Itertools;
-use tokenate::{LexError, Sp};
+use tokenate::{LexError, LexResult, Sp};
 
 use crate::{lexer::*, num::Num, value::*};
 
@@ -56,8 +56,8 @@ impl<'a> TokenPattern for &'a str {
 #[derive(Debug)]
 pub enum Command {
     Assignment(Assignment),
-    Load(Path),
     Eval(Expression),
+    Command,
 }
 
 struct Tokens {
@@ -66,6 +66,15 @@ struct Tokens {
 }
 
 impl Tokens {
+    pub fn new<R>(input: R) -> LexResult<Self>
+    where
+        R: Read,
+    {
+        Ok(Tokens {
+            iter: lex(input)?.into_iter(),
+            put_back: Vec::new(),
+        })
+    }
     pub fn take(&mut self) -> Option<Sp<Token>> {
         self.put_back.pop().or_else(|| self.iter.next())
     }
@@ -125,14 +134,13 @@ impl Tokens {
     {
         f(self).and_then(|op| op.ok_or_else(|| ParseError::Expected(name.into())))
     }
-    pub fn command(&mut self) -> Parse<Command> {
+    pub fn command(&mut self) -> Result<Command, ParseError> {
         if let Some(ass) = self.assigment()? {
-            Ok(ass.map(Command::Assignment))
-        } else if self.matches(Token::Ident("load".into())) {
-            let path = self.require(Self::path, "path")?;
-            Ok(path.map(Command::Load))
+            Ok(Command::Assignment(ass.data))
+        } else if self.matches(Token::Slash) {
+            Ok(Command::Command)
         } else if let Ok(expr) = self.expression() {
-            Ok(expr.map(Command::Eval))
+            Ok(Command::Eval(expr.data))
         } else {
             Err(ParseError::InvalidCommand)
         }
@@ -602,6 +610,15 @@ impl Path {
     }
 }
 
+impl FromStr for Path {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Tokens::new(s.as_bytes())?
+            .require(Tokens::path, "path")
+            .map(|path| path.data)
+    }
+}
+
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Term {
     #[display(fmt = "({})", _0)]
@@ -641,10 +658,5 @@ pub fn parse<R>(input: R) -> Result<Command, ParseError>
 where
     R: Read,
 {
-    Tokens {
-        iter: lex(input)?.into_iter(),
-        put_back: Vec::new(),
-    }
-    .command()
-    .map(|com| com.data)
+    Tokens::new(input)?.command()
 }
