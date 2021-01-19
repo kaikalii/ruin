@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use std::rc::Rc;
+
 use colored::Colorize;
 use derive_more::Display;
 use itertools::Itertools;
@@ -8,9 +10,9 @@ use rpds::{RedBlackTreeMap, Vector};
 use crate::{num::Num, parse::Expression};
 
 pub type List = Vector<Value>;
-pub type Table = RedBlackTreeMap<Value, Value>;
+pub type Table = RedBlackTreeMap<Key, Value>;
 
-#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Value {
     #[display(fmt = "{}", "\"nil\".blue()")]
     Nil,
@@ -22,7 +24,7 @@ pub enum Value {
     String(String),
     List(List),
     Table(Table),
-    Function(Box<Function>),
+    Function(Rc<Function>),
 }
 
 impl Value {
@@ -42,7 +44,14 @@ impl Value {
     }
 }
 
-#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Key {
+    Num(Num),
+    String(String),
+    Table(Table),
+}
+
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[display(
     fmt = "{}({}) {}",
     "\"fn\".magenta()",
@@ -52,6 +61,7 @@ impl Value {
 pub struct Function {
     pub args: Vec<String>,
     pub body: Expression,
+    pub env: RedBlackTreeMap<String, Expression>,
 }
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

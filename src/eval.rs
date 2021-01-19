@@ -144,6 +144,9 @@ impl ExprCall {
             for (name, val) in function.args.iter().zip(arg_vals) {
                 function_cb.insert_val(name.clone(), val);
             }
+            for (ident, expr) in &function.env {
+                function_cb.insert(ident.clone(), expr.clone())
+            }
             cb.push(function_cb);
             let ret = function.body.eval(cb, caller);
             cb.pop();
@@ -179,7 +182,7 @@ impl Term {
                 }
             }
             Term::String(s) => Value::String(s.clone()),
-            Term::Function(f) => Value::Function(f.clone()),
+            Term::Function(f) => Value::Function(f.clone().into()),
         })
     }
 }

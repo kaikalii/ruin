@@ -384,6 +384,7 @@ impl Tokens {
             Some((fn_token.span | expr.span).sp(Function {
                 args,
                 body: expr.data,
+                env: Default::default(),
             }))
         } else {
             None
@@ -391,14 +392,14 @@ impl Tokens {
     }
 }
 
-#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[display(fmt = "{} = {}", "ident.bright_white()", expr)]
 pub struct Assignment {
     pub ident: String,
     pub expr: Expression,
 }
 
-#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[display(bound = "O: StdDisplay, T: StdDisplay")]
 #[display(
     fmt = "{}{}",
@@ -436,7 +437,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Right<O, T> {
     pub op: Sp<O>,
     pub expr: Sp<T>,
@@ -448,7 +449,7 @@ impl<O, T> Right<O, T> {
     }
 }
 
-#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[display(
     fmt = "{}{}",
     r#"(0..*count).map(|_| "not ").collect::<String>()"#,
@@ -472,17 +473,17 @@ where
     }
 }
 
-#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[display(fmt = "or")]
 pub struct OpOr;
-#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[display(fmt = "and")]
 pub struct OpAnd;
-#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[display(fmt = "and")]
 pub struct OpNot;
 
-#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OpCmp {
     #[display(fmt = "is")]
     Is,
@@ -498,7 +499,7 @@ pub enum OpCmp {
     GreaterOrEqual,
 }
 
-#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OpAS {
     #[display(fmt = "+")]
     Add,
@@ -506,7 +507,7 @@ pub enum OpAS {
     Sub,
 }
 
-#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OpMDR {
     #[display(fmt = "*")]
     Mul,
@@ -523,7 +524,7 @@ pub type ExprCmp = BinExpr<OpCmp, ExprAS>;
 pub type ExprAS = BinExpr<OpAS, ExprMDR>;
 pub type ExprMDR = BinExpr<OpMDR, ExprCall>;
 
-#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[display(
     fmt = "{}{}",
     fexpr,
@@ -554,7 +555,7 @@ impl Node for ExprCall {
 
 pub type ExprNot = UnOp<OpNot, Term>;
 
-#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[display(
     fmt = "{}{}",
     r#"disam.iter().map(|s| format!("{}.", s)).collect::<String>()"#,
@@ -619,7 +620,7 @@ impl FromStr for Path {
     }
 }
 
-#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Term {
     #[display(fmt = "({})", _0)]
     Expr(Box<Expression>),
