@@ -1,6 +1,5 @@
 mod codebase;
 mod eval;
-mod jit;
 mod lexer;
 mod num;
 mod parse;
