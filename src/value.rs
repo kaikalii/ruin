@@ -1,16 +1,16 @@
 #![allow(dead_code)]
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use colored::Colorize;
 use derive_more::Display;
 use itertools::Itertools;
-use rpds::{RedBlackTreeMap, Vector};
+use rpds::{RedBlackTreeMapSync, VectorSync};
 
 use crate::{eval::EvalError, num::Num, parse::*};
 
-pub type List = Vector<Value>;
-pub type Table = RedBlackTreeMap<Key, Value>;
+pub type List = VectorSync<Value>;
+pub type Table = RedBlackTreeMapSync<Key, Value>;
 
 #[derive(Debug, Display, Clone, PartialEq, Eq)]
 pub enum Value {
@@ -26,10 +26,10 @@ pub enum Value {
     Error(String),
     List(List),
     Table(Table),
-    Function(Rc<Function>),
+    Function(Arc<Function>),
     #[display(fmt = "{}", "format_expression_value(expr, val)")]
     Expression {
-        expr: Rc<Expression>,
+        expr: Arc<Expression>,
         val: Option<Box<Value>>,
     },
 }
@@ -123,7 +123,7 @@ pub enum Key {
 pub struct Function {
     pub args: Vec<String>,
     pub body: Expression,
-    pub env: RedBlackTreeMap<String, Value>,
+    pub env: RedBlackTreeMapSync<String, Value>,
 }
 
 impl PartialEq for Function {

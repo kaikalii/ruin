@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use colored::Colorize;
 use indexmap::IndexMap;
@@ -7,17 +7,17 @@ use crate::{eval::*, parse::*, value::*};
 
 #[derive(Debug, Clone, Default)]
 pub struct Codebase {
-    pub parent: Option<Rc<Self>>,
+    pub parent: Option<Arc<Self>>,
     pub vals: IndexMap<Path, Value>,
 }
 
 impl Codebase {
     #[track_caller]
     #[allow(clippy::wrong_self_convention, clippy::needless_lifetimes)]
-    pub fn as_mut<'a>(self: &'a mut Rc<Self>) -> &'a mut Self {
-        Rc::get_mut(self).expect("Codebase is cloned")
+    pub fn as_mut<'a>(self: &'a mut Arc<Self>) -> &'a mut Self {
+        Arc::get_mut(self).expect("Codebase is cloned")
     }
-    pub fn from_parent(parent: Rc<Self>) -> Rc<Self> {
+    pub fn from_parent(parent: Arc<Self>) -> Arc<Self> {
         Codebase {
             parent: Some(parent),
             ..Default::default()
@@ -71,7 +71,7 @@ impl Codebase {
             }
         }
     }
-    pub fn eval_all(self: &mut Rc<Self>) {
+    pub fn eval_all(self: &mut Arc<Self>) {
         // Get initial count and paths
         let mut count = self.evaled_count();
         let paths: Vec<_> = self.vals.keys().cloned().collect();
@@ -87,7 +87,7 @@ impl Codebase {
             count = new_count;
         }
     }
-    fn eval_path(self: &mut Rc<Self>, path: &Path) {
+    fn eval_path(self: &mut Arc<Self>, path: &Path) {
         let evald = eval(self, path);
         if let Some(val) = self.as_mut().vals.get_mut(path) {
             if let Value::Expression { val, .. } = val {
@@ -101,7 +101,7 @@ impl Codebase {
                     if let Some(parent_val) = self.as_mut().vals.get_mut(&parent) {
                         match parent_val.as_evald_mut() {
                             Value::Function(function) => {
-                                let function = Rc::make_mut(function);
+                                let function = Arc::make_mut(function);
                                 function.env =
                                     function.env.insert(path.name.clone().unwrap(), child_val);
                             }

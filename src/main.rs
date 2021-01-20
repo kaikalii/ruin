@@ -9,7 +9,7 @@ use std::{
     fs,
     io::{stdin, stdout, BufRead, Write},
     iter::once,
-    rc::Rc,
+    sync::Arc,
 };
 
 use clap::Clap;
@@ -22,7 +22,7 @@ use parse::{parse, Command, Path};
 fn main() {
     color_backtrace::install();
 
-    let mut cb = Rc::new(Codebase::default());
+    let mut cb = Arc::new(Codebase::default());
     print_prompt();
     for input in stdin().lock().lines().filter_map(Result::ok) {
         handle_input(&input, &mut cb, true);
@@ -30,7 +30,7 @@ fn main() {
     }
 }
 
-fn handle_input(input: &str, cb: &mut Rc<Codebase>, eval: bool) {
+fn handle_input(input: &str, cb: &mut Arc<Codebase>, eval: bool) {
     let input = input.trim();
     match parse(input.as_bytes()) {
         Ok(command) => match command {
@@ -61,7 +61,7 @@ fn handle_input(input: &str, cb: &mut Rc<Codebase>, eval: bool) {
             }
             Command::Eval(expr) => {
                 println!();
-                match expr.eval(EvalState::new(cb, &once(&Path::GLOBAL).collect())) {
+                match expr.eval(EvalState::new(cb.clone(), once(Path::GLOBAL).collect())) {
                     Ok(val) => println!("{}", val),
                     Err(e) => println!("{}", e.to_string().red()),
                 }

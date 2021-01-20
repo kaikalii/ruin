@@ -19,7 +19,7 @@ pub enum Token {
     Hyphen,
     Asterisk,
     Slash,
-    Percent,
+    PeArcent,
     OpenParen,
     CloseParen,
     And,
@@ -44,7 +44,7 @@ impl Display for Token {
             Token::Hyphen => '-'.fmt(f),
             Token::Asterisk => '*'.fmt(f),
             Token::Slash => '/'.fmt(f),
-            Token::Percent => '%'.fmt(f),
+            Token::PeArcent => '%'.fmt(f),
             Token::OpenParen => '('.fmt(f),
             Token::CloseParen => ')'.fmt(f),
             Token::And => "and".fmt(f),
@@ -111,7 +111,7 @@ fn command_pattern() -> impl Pattern<Token = Token> {
         .or('-'.is(Token::Hyphen))
         .or('*'.is(Token::Asterisk))
         .or('/'.is(Token::Slash))
-        .or('%'.is(Token::Percent))
+        .or('%'.is(Token::PeArcent))
         .or('('.is(Token::OpenParen))
         .or(')'.is(Token::CloseParen))
         .or('.'.is(Token::Period))

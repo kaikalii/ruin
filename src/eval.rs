@@ -1,7 +1,7 @@
-use std::{iter::repeat, rc::Rc};
+use std::{iter::repeat, sync::Arc};
 
 use derive_more::Display;
-use rpds::Vector;
+use rpds::VectorSync;
 
 use crate::{codebase::*, parse::*, value::*};
 
@@ -21,28 +21,42 @@ pub enum EvalError {
 
 pub type EvalResult = Result<Value, EvalError>;
 
-pub type Callers<'a> = Vector<&'a Path>;
+pub type Callers = VectorSync<Path>;
 
-#[derive(Clone, Copy)]
-pub struct EvalState<'a> {
-    pub cb: &'a Rc<Codebase>,
-    pub callers: &'a Callers<'a>,
+const RECURSION_LIMIT: usize = if cfg!(debug_assertions) { 80 } else { 300 };
+
+#[derive(Clone)]
+pub struct EvalState {
+    pub cb: Arc<Codebase>,
+    pub callers: Callers,
+    pub depth: usize,
 }
 
-impl<'a> EvalState<'a> {
-    pub fn new(cb: &'a Rc<Codebase>, callers: &'a Callers<'a>) -> Self {
-        EvalState { cb, callers }
+impl EvalState {
+    pub fn new(cb: Arc<Codebase>, callers: Callers) -> Self {
+        EvalState {
+            cb,
+            callers,
+            depth: 0,
+        }
+    }
+    pub fn depth(self, depth: usize) -> Self {
+        EvalState { depth, ..self }
     }
 }
 
-pub fn eval(cb: &Rc<Codebase>, path: &Path) -> Value {
-    eval_rec(path, EvalState::new(cb, &Vector::new().push_back(path))).into()
+pub fn eval(cb: &Arc<Codebase>, path: &Path) -> Value {
+    eval_rec(
+        path,
+        EvalState::new(cb.clone(), Callers::default().push_back(path.clone())),
+    )
+    .into()
 }
 
 pub fn eval_rec(path: &Path, state: EvalState) -> EvalResult {
     if let Some(val) = state.cb.get(path).cloned() {
         if let Value::Expression { val: None, expr } = val {
-            expr.eval(state)
+            expr.eval(state.clone())
         } else {
             Ok(val.as_evald().clone())
         }
@@ -53,12 +67,12 @@ pub fn eval_rec(path: &Path, state: EvalState) -> EvalResult {
 
 impl ExprOr {
     pub fn eval(&self, state: EvalState) -> EvalResult {
-        let mut val = self.left.data.eval(state)?;
+        let mut val = self.left.data.eval(state.clone())?;
         for right in &self.rights {
             val = if val.is_truth() {
                 val
             } else {
-                right.expr.data.eval(state)?
+                right.expr.data.eval(state.clone())?
             };
         }
         Ok(val)
@@ -67,10 +81,10 @@ impl ExprOr {
 
 impl ExprAnd {
     pub fn eval(&self, state: EvalState) -> EvalResult {
-        let mut val = self.left.data.eval(state)?;
+        let mut val = self.left.data.eval(state.clone())?;
         for right in &self.rights {
             val = if val.is_truth() {
-                right.expr.data.eval(state)?
+                right.expr.data.eval(state.clone())?
             } else {
                 val
             };
@@ -79,12 +93,12 @@ impl ExprAnd {
     }
 }
 
-impl ExprCmp {
+impl ExpArcmp {
     pub fn eval(&self, state: EvalState) -> EvalResult {
-        let mut val = self.left.data.eval(state)?;
+        let mut val = self.left.data.eval(state.clone())?;
         for right in &self.rights {
             let op = right.op.data;
-            let right = right.expr.data.eval(state)?;
+            let right = right.expr.data.eval(state.clone())?;
             val = Value::Bool(match op {
                 OpCmp::Is => val == right,
                 OpCmp::Isnt => val != right,
@@ -107,10 +121,10 @@ impl ExprCmp {
 
 impl ExprAS {
     pub fn eval(&self, state: EvalState) -> EvalResult {
-        let mut val = self.left.data.eval(state)?;
+        let mut val = self.left.data.eval(state.clone())?;
         for right in &self.rights {
             let op = right.op.data;
-            let right = right.expr.data.eval(state)?;
+            let right = right.expr.data.eval(state.clone())?;
             val = match (val, right) {
                 (Value::Error(e), _) | (_, Value::Error(e)) => return Ok(Value::Error(e)),
                 (Value::Num(a), Value::Num(b)) => Value::Num(match op {
@@ -126,10 +140,10 @@ impl ExprAS {
 
 impl ExprMDR {
     pub fn eval(&self, state: EvalState) -> EvalResult {
-        let mut val = self.left.data.eval(state)?;
+        let mut val = self.left.data.eval(state.clone())?;
         for right in &self.rights {
             let op = right.op.data;
-            let right = right.expr.data.eval(state)?;
+            let right = right.expr.data.eval(state.clone())?;
             val = match (val, right) {
                 (Value::Error(e), _) | (_, Value::Error(e)) => return Ok(Value::Error(e)),
                 (Value::Num(a), Value::Num(b)) => Value::Num(match op {
@@ -144,11 +158,11 @@ impl ExprMDR {
     }
 }
 
-impl ExprCall {
+impl ExpArcall {
     pub fn eval(&self, state: EvalState) -> EvalResult {
-        let fexpr = self.fexpr.eval(state)?;
+        let fexpr = self.fexpr.eval(state.clone())?;
         if let Some(args) = &self.args {
-            let function = if let Value::Function(f) = &fexpr {
+            let function = if let Value::Function(f) = fexpr {
                 f
             } else {
                 return Err(EvalError::CallNonFunction {
@@ -158,7 +172,7 @@ impl ExprCall {
             };
             let mut arg_vals = Vec::with_capacity(args.len());
             for arg in args {
-                arg_vals.push(arg.eval(state)?);
+                arg_vals.push(arg.eval(state.clone())?);
             }
 
             let mut function_cb = Codebase::from_parent(state.cb.clone());
@@ -172,9 +186,19 @@ impl ExprCall {
             for (ident, expr) in &function.env {
                 function_cb.as_mut().insert(ident.into(), expr.clone())
             }
-            function
-                .body
-                .eval(EvalState::new(&function_cb, state.callers))
+            if state.depth == RECURSION_LIMIT {
+                std::thread::spawn(move || {
+                    function
+                        .body
+                        .eval(EvalState::new(function_cb, state.callers).depth(0))
+                })
+                .join()
+                .unwrap()
+            } else {
+                function
+                    .body
+                    .eval(EvalState::new(function_cb, state.callers).depth(state.depth + 1))
+            }
         } else {
             Ok(fexpr)
         }
@@ -208,10 +232,8 @@ impl Term {
                     return Err(EvalError::RecursiveValue(ident.into()));
                 } else {
                     let path = Path::from(ident);
-                    let val: Value = eval_rec(
-                        &path,
-                        EvalState::new(state.cb, &state.callers.push_back(&path)),
-                    )?;
+                    let sub_callers = state.callers.push_back(path.clone());
+                    let val: Value = eval_rec(&path, EvalState::new(state.cb, sub_callers))?;
                     val
                 }
             }

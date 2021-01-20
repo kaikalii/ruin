@@ -280,7 +280,7 @@ impl Tokens {
         } else {
             left.span
         };
-        Ok(span.sp(ExprOr { left, rights }))
+        Ok(span.sp(ExprOr::new(left, rights)))
     }
     pub fn expr_and(&mut self) -> Parse<ExprAnd> {
         let left = self.expr_cmp()?;
@@ -297,9 +297,9 @@ impl Tokens {
         } else {
             left.span
         };
-        Ok(span.sp(ExprAnd { left, rights }))
+        Ok(span.sp(ExprAnd::new(left, rights)))
     }
-    pub fn expr_cmp(&mut self) -> Parse<ExprCmp> {
+    pub fn expr_cmp(&mut self) -> Parse<ExpArcmp> {
         let left = self.expr_as()?;
         let mut rights = Vec::new();
         while let Some(right) = self
@@ -314,7 +314,7 @@ impl Tokens {
         } else {
             left.span
         };
-        Ok(span.sp(ExprCmp { left, rights }))
+        Ok(span.sp(ExpArcmp::new(left, rights)))
     }
     pub fn expr_as(&mut self) -> Parse<ExprAS> {
         let left = self.expr_mdr()?;
@@ -332,7 +332,7 @@ impl Tokens {
         } else {
             left.span
         };
-        Ok(span.sp(ExprAS { left, rights }))
+        Ok(span.sp(ExprAS::new(left, rights)))
     }
     pub fn expr_mdr(&mut self) -> Parse<ExprMDR> {
         let left = self.expr_call()?;
@@ -340,7 +340,7 @@ impl Tokens {
         while let Some(right) = self
             .matches_as(Token::Asterisk, OpMDR::Mul)
             .or_else(|| self.matches_as(Token::Slash, OpMDR::Div))
-            .or_else(|| self.matches_as(Token::Percent, OpMDR::Rem))
+            .or_else(|| self.matches_as(Token::PeArcent, OpMDR::Rem))
             .map(|op| self.expr_call().map(|expr| Right::new(op, expr)))
             .transpose()?
         {
@@ -351,7 +351,7 @@ impl Tokens {
         } else {
             left.span
         };
-        Ok(span.sp(ExprMDR { left, rights }))
+        Ok(span.sp(ExprMDR::new(left, rights)))
     }
     #[allow(dead_code)]
     fn dbg(&self, line: u32) {
@@ -361,7 +361,7 @@ impl Tokens {
         }
         println!("{}", self.cursor);
     }
-    pub fn expr_call(&mut self) -> Parse<ExprCall> {
+    pub fn expr_call(&mut self) -> Parse<ExpArcall> {
         let fexpr = self.expr_not()?;
         let mut end = fexpr.span.end;
         let args = if self.matches(Token::OpenParen) {
@@ -379,7 +379,7 @@ impl Tokens {
         } else {
             None
         };
-        Ok(fexpr.span.start.to(end).sp(ExprCall {
+        Ok(fexpr.span.start.to(end).sp(ExpArcall {
             fexpr: fexpr.data,
             args,
         }))
@@ -460,8 +460,17 @@ pub struct Assignment {
     r#"rights.iter().map(|r| { format!(" {} {}", r.op.data, r.expr.data) }).collect::<String>()"#
 )]
 pub struct BinExpr<O, T> {
-    pub left: Sp<T>,
+    pub left: Box<Sp<T>>,
     pub rights: Vec<Right<O, T>>,
+}
+
+impl<O, T> BinExpr<O, T> {
+    pub fn new(left: Sp<T>, rights: Vec<Right<O, T>>) -> Self {
+        BinExpr {
+            left: Box::new(left),
+            rights,
+        }
+    }
 }
 
 pub trait Node {
@@ -572,10 +581,15 @@ pub enum OpMDR {
 
 pub type Expression = ExprOr;
 pub type ExprOr = BinExpr<OpOr, ExprAnd>;
-pub type ExprAnd = BinExpr<OpAnd, ExprCmp>;
-pub type ExprCmp = BinExpr<OpCmp, ExprAS>;
+pub type ExprAnd = BinExpr<OpAnd, ExpArcmp>;
+pub type ExpArcmp = BinExpr<OpCmp, ExprAS>;
 pub type ExprAS = BinExpr<OpAS, ExprMDR>;
-pub type ExprMDR = BinExpr<OpMDR, ExprCall>;
+pub type ExprMDR = BinExpr<OpMDR, ExpArcall>;
+
+fn _expression_size() {
+    #[allow(invalid_value)]
+    let _: [u8; 32] = unsafe { std::mem::transmute::<Expression, _>(std::mem::zeroed()) };
+}
 
 #[derive(Debug, Display, Clone, PartialEq, Eq)]
 #[display(
@@ -585,12 +599,12 @@ pub type ExprMDR = BinExpr<OpMDR, ExprCall>;
         |args| format!("({})", args.iter().map(ToString::to_string).intersperse(", ".into()).collect::<String>())
     ).unwrap_or_default()"#
 )]
-pub struct ExprCall {
+pub struct ExpArcall {
     pub fexpr: ExprNot,
     pub args: Option<Vec<Expression>>,
 }
 
-impl Node for ExprCall {
+impl Node for ExpArcall {
     fn contains_ident(&self, ident: &str) -> bool {
         self.fexpr.contains_ident(ident)
             || self.args.as_ref().map_or(false, |args| {
