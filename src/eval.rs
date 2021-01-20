@@ -93,7 +93,7 @@ impl ExprAnd {
     }
 }
 
-impl ExpArcmp {
+impl ExprCmp {
     pub fn eval(&self, state: EvalState) -> EvalResult {
         let mut val = self.left.data.eval(state.clone())?;
         for right in &self.rights {
@@ -162,46 +162,50 @@ impl ExprCall {
     pub fn eval(&self, state: EvalState) -> EvalResult {
         let fexpr = self.fexpr.eval(state.clone())?;
         if let Some(args) = &self.args {
-            let function = if let Value::Function(f) = fexpr {
-                f
-            } else {
-                return Err(EvalError::CallNonFunction {
-                    expr: self.fexpr.to_string(),
-                    ty: fexpr.ty(),
-                });
-            };
             let mut arg_vals = Vec::with_capacity(args.len());
             for arg in args {
                 arg_vals.push(arg.eval(state.clone())?);
             }
-
-            let mut function_cb = Codebase::from_parent(state.cb.clone());
-            for (name, val) in function
-                .args
-                .iter()
-                .zip(arg_vals.into_iter().chain(repeat(Value::Nil)))
-            {
-                function_cb.as_mut().insert(name.into(), val);
-            }
-            for (ident, expr) in &function.env {
-                function_cb.as_mut().insert(ident.into(), expr.clone())
-            }
-            if state.depth == RECURSION_LIMIT {
-                std::thread::spawn(move || {
-                    function
-                        .body
-                        .eval(EvalState::new(function_cb, state.callers).depth(0))
-                })
-                .join()
-                .unwrap()
-            } else {
-                function
-                    .body
-                    .eval(EvalState::new(function_cb, state.callers).depth(state.depth + 1))
-            }
+            eval_function(&fexpr, arg_vals, state)
         } else {
             Ok(fexpr)
         }
+    }
+}
+
+pub fn eval_function(fexpr: &Value, args: Vec<Value>, state: EvalState) -> EvalResult {
+    let function = if let Value::Function(f) = fexpr.as_evald() {
+        f.clone()
+    } else {
+        return Err(EvalError::CallNonFunction {
+            expr: fexpr.to_string(),
+            ty: fexpr.ty(),
+        });
+    };
+
+    let mut function_cb = Codebase::from_parent(state.cb.clone());
+    for (name, val) in function
+        .args
+        .iter()
+        .zip(args.into_iter().chain(repeat(Value::Nil)))
+    {
+        function_cb.as_mut().insert(name.into(), val);
+    }
+    for (ident, expr) in &function.env {
+        function_cb.as_mut().insert(ident.into(), expr.clone())
+    }
+    if state.depth == RECURSION_LIMIT {
+        std::thread::spawn(move || {
+            function
+                .body
+                .eval(EvalState::new(function_cb, state.callers).depth(0))
+        })
+        .join()
+        .unwrap()
+    } else {
+        function
+            .body
+            .eval(EvalState::new(function_cb, state.callers).depth(state.depth + 1))
     }
 }
 

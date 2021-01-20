@@ -32,6 +32,8 @@ pub enum Value {
         expr: Arc<Expression>,
         val: Option<Box<Value>>,
     },
+    #[display(fmt = "seq")]
+    Seq,
 }
 
 impl Value {
@@ -48,6 +50,7 @@ impl Value {
                 val.as_deref().map(Value::ty).unwrap_or(Type::Expression)
             }
             Value::Error(_) => Type::Error,
+            Value::Seq => Type::Seq,
         }
     }
     pub fn is_truth(&self) -> bool {
@@ -156,6 +159,8 @@ pub enum Type {
     Table,
     #[display(fmt = "function")]
     Function,
+    #[display(fmt = "seq")]
+    Seq,
     #[display(fmt = "expression")]
     Expression,
     #[display(fmt = "error")]

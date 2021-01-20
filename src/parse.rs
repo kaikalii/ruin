@@ -299,7 +299,7 @@ impl Tokens {
         };
         Ok(span.sp(ExprAnd::new(left, rights)))
     }
-    pub fn expr_cmp(&mut self) -> Parse<ExpArcmp> {
+    pub fn expr_cmp(&mut self) -> Parse<ExprCmp> {
         let left = self.expr_as()?;
         let mut rights = Vec::new();
         while let Some(right) = self
@@ -314,7 +314,7 @@ impl Tokens {
         } else {
             left.span
         };
-        Ok(span.sp(ExpArcmp::new(left, rights)))
+        Ok(span.sp(ExprCmp::new(left, rights)))
     }
     pub fn expr_as(&mut self) -> Parse<ExprAS> {
         let left = self.expr_mdr()?;
@@ -368,7 +368,7 @@ impl Tokens {
         let (fexpr, method_call_syntax) = if self.matches(Token::Colon) {
             let span = first.span;
             args = Some(vec![ExprOr::wrapping(span.sp(ExprAnd::wrapping(span.sp(
-                ExpArcmp::wrapping(span.sp(ExprAS::wrapping(
+                ExprCmp::wrapping(span.sp(ExprAS::wrapping(
                     span.sp(ExprMDR::wrapping(first.map(ExprCall::wrapping))),
                 ))),
             ))))]);
@@ -383,10 +383,13 @@ impl Tokens {
             self.matches(Token::OpenParen)
         };
         if has_args {
+            args.get_or_insert_with(Vec::new);
+        }
+        if has_args {
             while !self.matches(Token::CloseParen) {
                 let expr = self.expression()?;
                 end = expr.span.end;
-                args.get_or_insert_with(Vec::new).push(expr.data);
+                args.as_mut().unwrap().push(expr.data);
                 if !self.matches(Token::Comma) {
                     self.require_token(Token::CloseParen)?;
                     break;
@@ -611,8 +614,8 @@ pub enum OpMDR {
 
 pub type Expression = ExprOr;
 pub type ExprOr = BinExpr<OpOr, ExprAnd>;
-pub type ExprAnd = BinExpr<OpAnd, ExpArcmp>;
-pub type ExpArcmp = BinExpr<OpCmp, ExprAS>;
+pub type ExprAnd = BinExpr<OpAnd, ExprCmp>;
+pub type ExprCmp = BinExpr<OpCmp, ExprAS>;
 pub type ExprAS = BinExpr<OpAS, ExprMDR>;
 pub type ExprMDR = BinExpr<OpMDR, ExprCall>;
 

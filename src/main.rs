@@ -16,8 +16,9 @@ use clap::Clap;
 use colored::Colorize;
 
 use codebase::Codebase;
-use eval::EvalState;
+use eval::*;
 use parse::{parse, Command, Path};
+use value::*;
 
 fn main() {
     color_backtrace::install();
@@ -56,6 +57,7 @@ fn handle_input(input: &str, cb: &mut Arc<Codebase>, eval: bool) {
                         }
                         Err(_) => println!("Unable to open file with path {}", path),
                     },
+                    Ok(App::Run { path }) => run(cb, path),
                     Err(e) => println!("{}", e),
                 }
             }
@@ -80,4 +82,18 @@ fn print_prompt() {
 #[derive(Clap)]
 enum App {
     Load { path: Path },
+    Run { path: Path },
+}
+
+fn run(cb: &mut Arc<Codebase>, path: Path) {
+    if let Some(val) = cb.get(&path) {
+        let res = eval_function(
+            val,
+            vec![Value::Seq],
+            EvalState::new(cb.clone(), Default::default()),
+        );
+        println!("\n{}\n", Value::from(res));
+    } else {
+        println!("Unknown function: {}", path)
+    }
 }
