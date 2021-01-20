@@ -60,7 +60,7 @@ fn handle_input(input: &str, cb: &mut Codebase, eval: bool) {
             }
             Command::Eval(expr) => {
                 println!();
-                match expr.eval(cb, &Path::GLOBAL) {
+                match expr.eval(cb, &once(&Path::GLOBAL).collect()) {
                     Ok(val) => println!("{}", val),
                     Err(e) => println!("{}", e.to_string().red()),
                 }

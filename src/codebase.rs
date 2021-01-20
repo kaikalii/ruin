@@ -102,7 +102,6 @@ impl Codebase {
                                 function.env =
                                     function.env.insert(path.name.clone().unwrap(), child_val);
                             }
-
                             Value::Table(table) => {
                                 *table = table
                                     .insert(Key::String(path.name.clone().unwrap()), child_val);
