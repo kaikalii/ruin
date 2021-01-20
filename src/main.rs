@@ -16,6 +16,7 @@ use clap::Clap;
 use colored::Colorize;
 
 use codebase::Codebase;
+use eval::EvalState;
 use parse::{parse, Command, Path};
 
 fn main() {
@@ -60,7 +61,7 @@ fn handle_input(input: &str, cb: &mut Rc<Codebase>, eval: bool) {
             }
             Command::Eval(expr) => {
                 println!();
-                match expr.eval(cb, &once(&Path::GLOBAL).collect()) {
+                match expr.eval(EvalState::new(cb, &once(&Path::GLOBAL).collect())) {
                     Ok(val) => println!("{}", val),
                     Err(e) => println!("{}", e.to_string().red()),
                 }

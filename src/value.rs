@@ -12,7 +12,7 @@ use crate::{eval::EvalError, num::Num, parse::*};
 pub type List = Vector<Value>;
 pub type Table = RedBlackTreeMap<Key, Value>;
 
-#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Display, Clone, PartialEq, Eq)]
 pub enum Value {
     #[display(fmt = "{}", "\"nil\".blue()")]
     Nil,
@@ -111,10 +111,9 @@ impl From<Result<Value, EvalError>> for Value {
 pub enum Key {
     Num(Num),
     String(String),
-    Table(Table),
 }
 
-#[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Display, Clone)]
 #[display(
     fmt = "{}({}) {}",
     "\"fn\".magenta()",
@@ -126,6 +125,14 @@ pub struct Function {
     pub body: Expression,
     pub env: RedBlackTreeMap<String, Value>,
 }
+
+impl PartialEq for Function {
+    fn eq(&self, other: &Self) -> bool {
+        self.args == other.args && self.body == other.body && self.env == other.env
+    }
+}
+
+impl Eq for Function {}
 
 impl Function {
     pub fn contains_ident(&self, ident: &str) -> bool {
