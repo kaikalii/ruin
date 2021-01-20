@@ -29,6 +29,7 @@ pub enum Token {
     Period,
     Comma,
     Not,
+    Colon,
 }
 
 impl Display for Token {
@@ -54,6 +55,7 @@ impl Display for Token {
             Token::Period => '.'.fmt(f),
             Token::Comma => ','.fmt(f),
             Token::Not => "not".fmt(f),
+            Token::Colon => ':'.fmt(f),
         }
     }
 }
@@ -116,6 +118,7 @@ fn command_pattern() -> impl Pattern<Token = Token> {
         .or(')'.is(Token::CloseParen))
         .or('.'.is(Token::Period))
         .or(','.is(Token::Comma))
+        .or(':'.is(Token::Colon))
         .or("and".is(Token::And))
         .or("or".is(Token::Or))
         // Num

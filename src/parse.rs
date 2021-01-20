@@ -361,25 +361,39 @@ impl Tokens {
         }
         println!("{}", self.cursor);
     }
-    pub fn expr_call(&mut self) -> Parse<ExpArcall> {
-        let fexpr = self.expr_not()?;
-        let mut end = fexpr.span.end;
-        let args = if self.matches(Token::OpenParen) {
-            let mut args = Vec::new();
+    pub fn expr_call(&mut self) -> Parse<ExprCall> {
+        let first = self.expr_not()?;
+        let mut end = first.span.end;
+        let mut args: Option<Vec<Expression>> = None;
+        let (fexpr, method_call_syntax) = if self.matches(Token::Colon) {
+            let span = first.span;
+            args = Some(vec![ExprOr::wrapping(span.sp(ExprAnd::wrapping(span.sp(
+                ExpArcmp::wrapping(span.sp(ExprAS::wrapping(
+                    span.sp(ExprMDR::wrapping(first.map(ExprCall::wrapping))),
+                ))),
+            ))))]);
+            (self.term()?.map(UnOp::wrapping), true)
+        } else {
+            (first, false)
+        };
+        let has_args = if method_call_syntax {
+            self.require_token(Token::OpenParen)?;
+            true
+        } else {
+            self.matches(Token::OpenParen)
+        };
+        if has_args {
             while !self.matches(Token::CloseParen) {
                 let expr = self.expression()?;
                 end = expr.span.end;
-                args.push(expr.data);
+                args.get_or_insert_with(Vec::new).push(expr.data);
                 if !self.matches(Token::Comma) {
                     self.require_token(Token::CloseParen)?;
                     break;
                 }
             }
-            Some(args)
-        } else {
-            None
-        };
-        Ok(fexpr.span.start.to(end).sp(ExpArcall {
+        }
+        Ok(fexpr.span.start.to(end).sp(ExprCall {
             fexpr: fexpr.data,
             args,
         }))
@@ -404,6 +418,7 @@ impl Tokens {
     pub fn term(&mut self) -> Parse<Term> {
         Ok(if self.matches(Token::OpenParen) {
             let expr = self.expression()?;
+            println!("expr: {}", expr);
             self.require_token(Token::CloseParen)?;
             expr.map(Box::new).map(Term::Expr)
         } else if let Some(num) = self.num()? {
@@ -474,14 +489,17 @@ impl<O, T> BinExpr<O, T> {
 }
 
 pub trait Node {
+    type Child;
     fn contains_ident(&self, ident: &str) -> bool;
     fn terms(&self) -> usize;
+    fn wrapping(child: Self::Child) -> Self;
 }
 
 impl<O, T> Node for BinExpr<O, T>
 where
     T: Node,
 {
+    type Child = Sp<T>;
     fn contains_ident(&self, ident: &str) -> bool {
         self.left.data.contains_ident(ident)
             || self
@@ -496,6 +514,9 @@ where
                 .iter()
                 .map(|right| right.expr.data.terms())
                 .sum::<usize>()
+    }
+    fn wrapping(child: Self::Child) -> Self {
+        BinExpr::new(child, Vec::new())
     }
 }
 
@@ -526,22 +547,31 @@ pub struct UnOp<O, T> {
 impl<O, T> Node for UnOp<O, T>
 where
     T: Node,
+    O: Default,
 {
+    type Child = T;
     fn contains_ident(&self, ident: &str) -> bool {
         self.expr.contains_ident(ident)
     }
     fn terms(&self) -> usize {
         self.expr.terms()
     }
+    fn wrapping(child: Self::Child) -> Self {
+        UnOp {
+            op: O::default(),
+            count: 0,
+            expr: child,
+        }
+    }
 }
 
-#[derive(Debug, Display, Clone, PartialEq, Eq)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, Default)]
 #[display(fmt = "or")]
 pub struct OpOr;
-#[derive(Debug, Display, Clone, PartialEq, Eq)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, Default)]
 #[display(fmt = "and")]
 pub struct OpAnd;
-#[derive(Debug, Display, Clone, PartialEq, Eq)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, Default)]
 #[display(fmt = "and")]
 pub struct OpNot;
 
@@ -584,7 +614,7 @@ pub type ExprOr = BinExpr<OpOr, ExprAnd>;
 pub type ExprAnd = BinExpr<OpAnd, ExpArcmp>;
 pub type ExpArcmp = BinExpr<OpCmp, ExprAS>;
 pub type ExprAS = BinExpr<OpAS, ExprMDR>;
-pub type ExprMDR = BinExpr<OpMDR, ExpArcall>;
+pub type ExprMDR = BinExpr<OpMDR, ExprCall>;
 
 fn _expression_size() {
     #[allow(invalid_value)]
@@ -599,12 +629,13 @@ fn _expression_size() {
         |args| format!("({})", args.iter().map(ToString::to_string).intersperse(", ".into()).collect::<String>())
     ).unwrap_or_default()"#
 )]
-pub struct ExpArcall {
+pub struct ExprCall {
     pub fexpr: ExprNot,
     pub args: Option<Vec<Expression>>,
 }
 
-impl Node for ExpArcall {
+impl Node for ExprCall {
+    type Child = ExprNot;
     fn contains_ident(&self, ident: &str) -> bool {
         self.fexpr.contains_ident(ident)
             || self.args.as_ref().map_or(false, |args| {
@@ -617,6 +648,12 @@ impl Node for ExpArcall {
                 .args
                 .as_ref()
                 .map_or(0, |args| args.iter().map(Node::terms).sum())
+    }
+    fn wrapping(child: Self::Child) -> Self {
+        ExprCall {
+            fexpr: child,
+            args: None,
+        }
     }
 }
 
@@ -713,6 +750,7 @@ pub enum Term {
 }
 
 impl Node for Term {
+    type Child = Expression;
     fn contains_ident(&self, ident: &str) -> bool {
         match self {
             Term::Expr(expr) => expr.contains_ident(ident),
@@ -727,6 +765,9 @@ impl Node for Term {
         } else {
             1
         }
+    }
+    fn wrapping(child: Self::Child) -> Self {
+        Term::Expr(Box::new(child))
     }
 }
 

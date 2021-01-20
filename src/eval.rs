@@ -158,7 +158,7 @@ impl ExprMDR {
     }
 }
 
-impl ExpArcall {
+impl ExprCall {
     pub fn eval(&self, state: EvalState) -> EvalResult {
         let fexpr = self.fexpr.eval(state.clone())?;
         if let Some(args) = &self.args {
