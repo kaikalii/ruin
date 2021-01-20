@@ -24,18 +24,18 @@ pub type EvalResult = Result<Value, EvalError>;
 pub type Callers<'a> = Vector<&'a Path>;
 
 pub fn eval(cb: &Rc<Codebase>, path: &Path) -> Value {
-    eval_rec(path, cb, &Vector::new().push_back(path))
+    eval_rec(path, cb, &Vector::new().push_back(path)).into()
 }
 
-pub fn eval_rec(path: &Path, cb: &Rc<Codebase>, callers: &Callers) -> Value {
+pub fn eval_rec(path: &Path, cb: &Rc<Codebase>, callers: &Callers) -> EvalResult {
     if let Some(val) = cb.get(path).cloned() {
         if let Value::Expression { val: None, expr } = val {
-            expr.eval(cb, callers).into()
+            expr.eval(cb, callers)
         } else {
-            val.as_evaluated().clone()
+            Ok(val.as_evaluated().clone())
         }
     } else {
-        Err(EvalError::UnknownValue(path.clone())).into()
+        Err(EvalError::UnknownValue(path.clone()))
     }
 }
 
@@ -193,7 +193,7 @@ impl Term {
                     return Err(EvalError::RecursiveValue(ident.into()));
                 } else {
                     let path = Path::from(ident);
-                    let val: Value = eval_rec(&path, cb, &callers.push_back(&path));
+                    let val: Value = eval_rec(&path, cb, &callers.push_back(&path))?;
                     val
                 }
             }
