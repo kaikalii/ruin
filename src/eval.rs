@@ -32,7 +32,7 @@ pub fn eval_rec(path: &Path, cb: &Rc<Codebase>, callers: &Callers) -> EvalResult
         if let Value::Expression { val: None, expr } = val {
             expr.eval(cb, callers)
         } else {
-            Ok(val.as_evaluated().clone())
+            Ok(val.as_evald().clone())
         }
     } else {
         Err(EvalError::UnknownValue(path.clone()))

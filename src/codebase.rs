@@ -99,7 +99,7 @@ impl Codebase {
                 self.eval_path(&parent);
                 if let Some(child_val) = self.vals.get(path).cloned() {
                     if let Some(parent_val) = self.as_mut().vals.get_mut(&parent) {
-                        match parent_val {
+                        match parent_val.as_evald_mut() {
                             Value::Function(function) => {
                                 let function = Rc::make_mut(function);
                                 function.env =

@@ -76,9 +76,16 @@ impl Value {
             *val = None;
         }
     }
-    pub fn as_evaluated(&self) -> &Value {
+    pub fn as_evald(&self) -> &Value {
         if let Value::Expression { val: Some(val), .. } = self {
             &**val
+        } else {
+            self
+        }
+    }
+    pub fn as_evald_mut(&mut self) -> &mut Value {
+        if let Value::Expression { val: Some(val), .. } = self {
+            &mut **val
         } else {
             self
         }
