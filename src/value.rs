@@ -123,25 +123,56 @@ pub enum Key {
     "args.iter().map(|s| s.as_str()).intersperse(\", \").collect::<String>()",
     body
 )]
-pub struct Function {
+pub struct LangFunction {
     pub args: Vec<String>,
     pub body: Expression,
     pub env: RedBlackTreeMapSync<String, Value>,
 }
 
-impl PartialEq for Function {
+impl PartialEq for LangFunction {
     fn eq(&self, other: &Self) -> bool {
         self.args == other.args && self.body == other.body && self.env == other.env
     }
 }
 
-impl Eq for Function {}
+impl Eq for LangFunction {}
 
-impl Function {
+impl LangFunction {
     pub fn contains_ident(&self, ident: &str) -> bool {
         self.body.contains_ident(ident) && !self.args.iter().any(|i| i == ident)
     }
 }
+
+#[derive(Debug, Display, Clone)]
+pub enum Function {
+    Lang(LangFunction),
+}
+
+impl Function {
+    pub fn contains_ident(&self, ident: &str) -> bool {
+        match self {
+            Function::Lang(f) => f.contains_ident(ident),
+        }
+    }
+}
+
+impl From<LangFunction> for Function {
+    fn from(lf: LangFunction) -> Self {
+        Function::Lang(lf)
+    }
+}
+
+impl PartialEq for Function {
+    fn eq(&self, other: &Self) -> bool {
+        if let (Function::Lang(a), Function::Lang(b)) = (self, other) {
+            a == b
+        } else {
+            false
+        }
+    }
+}
+
+impl Eq for Function {}
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Type {

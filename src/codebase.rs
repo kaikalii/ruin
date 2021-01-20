@@ -100,11 +100,12 @@ impl Codebase {
                 if let Some(child_val) = self.vals.get(path).cloned() {
                     if let Some(parent_val) = self.as_mut().vals.get_mut(&parent) {
                         match parent_val.as_evald_mut() {
-                            Value::Function(function) => {
-                                let function = Arc::make_mut(function);
-                                function.env =
-                                    function.env.insert(path.name.clone().unwrap(), child_val);
-                            }
+                            Value::Function(function) => match Arc::make_mut(function) {
+                                Function::Lang(function) => {
+                                    function.env =
+                                        function.env.insert(path.name.clone().unwrap(), child_val);
+                                }
+                            },
                             Value::Table(table) => {
                                 *table = table
                                     .insert(Key::String(path.name.clone().unwrap()), child_val);
