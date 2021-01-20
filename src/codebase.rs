@@ -13,7 +13,7 @@ pub struct Codebase {
 
 impl Codebase {
     #[track_caller]
-    #[allow(clippy::wrong_self_convention)]
+    #[allow(clippy::wrong_self_convention, clippy::needless_lifetimes)]
     pub fn as_mut<'a>(self: &'a mut Rc<Self>) -> &'a mut Self {
         Rc::get_mut(self).expect("Codebase is cloned")
     }
