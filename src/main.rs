@@ -9,6 +9,7 @@ use std::{
     fs,
     io::{stdin, stdout, BufRead, Write},
     iter::once,
+    rc::Rc,
 };
 
 use clap::Clap;
@@ -20,7 +21,7 @@ use parse::{parse, Command, Path};
 fn main() {
     color_backtrace::install();
 
-    let mut cb = Codebase::default();
+    let mut cb = Rc::new(Codebase::default());
     print_prompt();
     for input in stdin().lock().lines().filter_map(Result::ok) {
         handle_input(&input, &mut cb, true);
@@ -28,12 +29,12 @@ fn main() {
     }
 }
 
-fn handle_input(input: &str, cb: &mut Codebase, eval: bool) {
+fn handle_input(input: &str, cb: &mut Rc<Codebase>, eval: bool) {
     let input = input.trim();
     match parse(input.as_bytes()) {
         Ok(command) => match command {
             Command::Assignment(ass) => {
-                cb.insert(ass.path, ass.expr);
+                cb.as_mut().insert(ass.path, ass.expr);
                 if eval {
                     cb.eval_all();
                     cb.print(10);

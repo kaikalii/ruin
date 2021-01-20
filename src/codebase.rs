@@ -12,14 +12,17 @@ pub struct Codebase {
 }
 
 impl Codebase {
-    pub fn push(&mut self, mut child: Self) {
-        std::mem::swap(self, &mut child);
-        self.parent = Some(Rc::new(child));
+    #[track_caller]
+    #[allow(clippy::wrong_self_convention)]
+    pub fn as_mut<'a>(self: &'a mut Rc<Self>) -> &'a mut Self {
+        Rc::get_mut(self).expect("Codebase is cloned")
     }
-    pub fn pop(&mut self) -> Self {
-        let mut parent = Rc::try_unwrap(self.parent.take().unwrap()).unwrap();
-        std::mem::swap(self, &mut parent);
-        parent
+    pub fn from_parent(parent: Rc<Self>) -> Rc<Self> {
+        Codebase {
+            parent: Some(parent),
+            ..Default::default()
+        }
+        .into()
     }
     pub fn get(&self, path: &Path) -> Option<&Value> {
         self.vals
@@ -68,7 +71,7 @@ impl Codebase {
             }
         }
     }
-    pub fn eval_all(&mut self) {
+    pub fn eval_all(self: &mut Rc<Self>) {
         // Get initial count and paths
         let mut count = self.evaled_count();
         let paths: Vec<_> = self.vals.keys().cloned().collect();
@@ -84,9 +87,9 @@ impl Codebase {
             count = new_count;
         }
     }
-    fn eval_path(&mut self, path: &Path) {
+    fn eval_path(self: &mut Rc<Self>, path: &Path) {
         let evald = eval(self, path);
-        if let Some(val) = self.vals.get_mut(path) {
+        if let Some(val) = self.as_mut().vals.get_mut(path) {
             if let Value::Expression { val, .. } = val {
                 *val = Some(evald.into());
             }
@@ -95,7 +98,7 @@ impl Codebase {
             if let Some(parent) = path.parent() {
                 self.eval_path(&parent);
                 if let Some(child_val) = self.vals.get(path).cloned() {
-                    if let Some(parent_val) = self.vals.get_mut(&parent) {
+                    if let Some(parent_val) = self.as_mut().vals.get_mut(&parent) {
                         match parent_val {
                             Value::Function(function) => {
                                 let function = Rc::make_mut(function);
@@ -109,7 +112,7 @@ impl Codebase {
                             parent_val => {
                                 let ty = parent_val.ty();
                                 let expr = parent_val.to_string();
-                                *self.vals.get_mut(path).unwrap() =
+                                *self.as_mut().vals.get_mut(path).unwrap() =
                                     Err(EvalError::CantAssign { expr, ty }).into();
                             }
                         }

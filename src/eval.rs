@@ -1,4 +1,4 @@
-use std::iter::repeat;
+use std::{iter::repeat, rc::Rc};
 
 use derive_more::Display;
 use rpds::Vector;
@@ -23,11 +23,11 @@ pub type EvalResult = Result<Value, EvalError>;
 
 pub type Callers<'a> = Vector<&'a Path>;
 
-pub fn eval(cb: &mut Codebase, path: &Path) -> Value {
+pub fn eval(cb: &Rc<Codebase>, path: &Path) -> Value {
     eval_rec(path, cb, &Vector::new().push_back(path))
 }
 
-pub fn eval_rec(path: &Path, cb: &mut Codebase, callers: &Callers) -> Value {
+pub fn eval_rec(path: &Path, cb: &Rc<Codebase>, callers: &Callers) -> Value {
     if let Some(val) = cb.get(path).cloned() {
         if let Value::Expression { val: None, expr } = val {
             expr.eval(cb, callers).into()
@@ -40,7 +40,7 @@ pub fn eval_rec(path: &Path, cb: &mut Codebase, callers: &Callers) -> Value {
 }
 
 impl ExprOr {
-    pub fn eval(&self, cb: &mut Codebase, callers: &Callers) -> EvalResult {
+    pub fn eval(&self, cb: &Rc<Codebase>, callers: &Callers) -> EvalResult {
         let mut val = self.left.data.eval(cb, callers)?;
         for right in &self.rights {
             val = if val.is_truth() {
@@ -54,7 +54,7 @@ impl ExprOr {
 }
 
 impl ExprAnd {
-    pub fn eval(&self, cb: &mut Codebase, callers: &Callers) -> EvalResult {
+    pub fn eval(&self, cb: &Rc<Codebase>, callers: &Callers) -> EvalResult {
         let mut val = self.left.data.eval(cb, callers)?;
         for right in &self.rights {
             val = if val.is_truth() {
@@ -68,7 +68,7 @@ impl ExprAnd {
 }
 
 impl ExprCmp {
-    pub fn eval(&self, cb: &mut Codebase, callers: &Callers) -> EvalResult {
+    pub fn eval(&self, cb: &Rc<Codebase>, callers: &Callers) -> EvalResult {
         let mut val = self.left.data.eval(cb, callers)?;
         for right in &self.rights {
             let op = right.op.data;
@@ -94,7 +94,7 @@ impl ExprCmp {
 }
 
 impl ExprAS {
-    pub fn eval(&self, cb: &mut Codebase, callers: &Callers) -> EvalResult {
+    pub fn eval(&self, cb: &Rc<Codebase>, callers: &Callers) -> EvalResult {
         let mut val = self.left.data.eval(cb, callers)?;
         for right in &self.rights {
             let op = right.op.data;
@@ -113,7 +113,7 @@ impl ExprAS {
 }
 
 impl ExprMDR {
-    pub fn eval(&self, cb: &mut Codebase, callers: &Callers) -> EvalResult {
+    pub fn eval(&self, cb: &Rc<Codebase>, callers: &Callers) -> EvalResult {
         let mut val = self.left.data.eval(cb, callers)?;
         for right in &self.rights {
             let op = right.op.data;
@@ -133,7 +133,7 @@ impl ExprMDR {
 }
 
 impl ExprCall {
-    pub fn eval(&self, cb: &mut Codebase, callers: &Callers) -> EvalResult {
+    pub fn eval(&self, cb: &Rc<Codebase>, callers: &Callers) -> EvalResult {
         let fexpr = self.fexpr.eval(cb, callers)?;
         if let Some(args) = &self.args {
             let function = if let Value::Function(f) = &fexpr {
@@ -149,21 +149,18 @@ impl ExprCall {
                 arg_vals.push(arg.eval(cb, callers)?);
             }
 
-            let mut function_cb = Codebase::default();
+            let mut function_cb = Codebase::from_parent(cb.clone());
             for (name, val) in function
                 .args
                 .iter()
                 .zip(arg_vals.into_iter().chain(repeat(Value::Nil)))
             {
-                function_cb.insert(name.into(), val);
+                function_cb.as_mut().insert(name.into(), val);
             }
             for (ident, expr) in &function.env {
-                function_cb.insert(ident.into(), expr.clone())
+                function_cb.as_mut().insert(ident.into(), expr.clone())
             }
-            cb.push(function_cb);
-            let ret = function.body.eval(cb, callers);
-            cb.pop();
-            ret
+            function.body.eval(&function_cb, callers)
         } else {
             Ok(fexpr)
         }
@@ -171,7 +168,7 @@ impl ExprCall {
 }
 
 impl ExprNot {
-    pub fn eval(&self, cb: &mut Codebase, callers: &Callers) -> EvalResult {
+    pub fn eval(&self, cb: &Rc<Codebase>, callers: &Callers) -> EvalResult {
         let mut val = self.expr.eval(cb, callers)?;
         for _ in 0..self.count {
             val = Value::Bool(!val.is_truth());
@@ -181,7 +178,7 @@ impl ExprNot {
 }
 
 impl Term {
-    pub fn eval(&self, cb: &mut Codebase, callers: &Callers) -> EvalResult {
+    pub fn eval(&self, cb: &Rc<Codebase>, callers: &Callers) -> EvalResult {
         Ok(match self {
             Term::Expr(expr) => expr.eval(cb, callers)?,
             Term::Bool(b) => Value::Bool(*b),
