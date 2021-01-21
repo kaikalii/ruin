@@ -172,16 +172,33 @@ impl ExprMDR {
 
 impl ExprCall {
     pub fn eval(&self, state: EvalState) -> EvalResult {
-        let term = self.term.eval(state.clone())?;
-        if let Some(args) = &self.args {
-            let mut arg_vals = Vec::with_capacity(args.len());
-            for arg in args {
-                arg_vals.push(arg.eval(state.clone())?);
+        Ok(match self {
+            ExprCall::Method { first, calls } => {
+                let mut val = first.eval(state.clone())?;
+                for call in calls {
+                    let mut arg_vals = Vec::with_capacity(call.args.len());
+                    arg_vals.push(val);
+                    for arg in &call.args {
+                        arg_vals.push(arg.eval(state.clone())?);
+                    }
+                    let function = call.term.eval(state.clone())?;
+                    val = eval_function(&function, arg_vals, state.clone())?;
+                }
+                val
             }
-            eval_function(&term, arg_vals, state)
-        } else {
-            Ok(term)
-        }
+            ExprCall::Regular { term, args } => {
+                let function = term.eval(state.clone())?;
+                if let Some(args) = args {
+                    let mut arg_vals = Vec::with_capacity(args.len());
+                    for arg in args {
+                        arg_vals.push(arg.eval(state.clone())?);
+                    }
+                    eval_function(&function, arg_vals, state)?
+                } else {
+                    function
+                }
+            }
+        })
     }
 }
 

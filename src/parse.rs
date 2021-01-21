@@ -381,43 +381,54 @@ impl Tokens {
     pub fn expr_call(&mut self) -> Parse<ExprCall> {
         let first = self.term()?;
         let mut end = first.span.end;
-        let mut args: Option<Vec<Expression>> = None;
-        let (term, method_call_syntax) = if self.matches(Token::Colon) {
-            let span = first.span;
-            args = Some(vec![ExprOr::wrapping(span.sp(ExprAnd::wrapping(span.sp(
-                ExprCmp::wrapping(span.sp(ExprAS::wrapping(span.sp(ExprMDR::wrapping(
-                    first.map(ExprCall::wrapping).map(ExprNot::wrapping),
-                ))))),
-            ))))]);
-            (self.require(Self::ident, "ident")?.map(Term::Ident), true)
-        } else {
-            (first, false)
-        };
-        let has_args = if method_call_syntax {
-            self.require_token(Token::OpenParen)?;
-            true
-        } else {
-            self.matches(Token::OpenParen)
-        };
-        if has_args {
-            args.get_or_insert_with(Vec::new);
+        let mut method_call_syntax = false;
+        let mut calls = Vec::new();
+        while self.matches(Token::Colon) {
+            method_call_syntax = true;
+            let term = self.term()?.data;
+            let args = self.require(Self::args, "arguments")?;
+            end = args.span.end;
+            calls.push(Call {
+                term,
+                args: args.data,
+            });
         }
-        if has_args {
-            while !self.matches(Token::CloseParen) {
+        if method_call_syntax {
+            return Ok(first.span.start.to(end).sp(ExprCall::Method {
+                first: first.data,
+                calls,
+            }));
+        }
+        let args = self.args()?;
+        if let Some(args) = &args {
+            end = args.span.end;
+        }
+        Ok(first.span.start.to(end).sp(ExprCall::Regular {
+            term: first.data,
+            args: args.map(|args| args.data),
+        }))
+    }
+    pub fn args(&mut self) -> MaybeParse<Vec<Expression>> {
+        Ok(if let Some(open_paren) = self.take_if(Token::OpenParen) {
+            let start = open_paren.span.start;
+            let mut args = Vec::new();
+            let end;
+            loop {
+                if let Some(close_paren) = self.take_if(Token::CloseParen) {
+                    end = close_paren.span.end;
+                    break;
+                }
                 let expr = self.expression()?;
-                end = expr.span.end;
-                args.as_mut().unwrap().push(expr.data);
+                args.push(expr.data);
                 if !self.matches(Token::Comma) {
-                    self.require_token(Token::CloseParen)?;
+                    end = self.require_token(Token::CloseParen)?.span.end;
                     break;
                 }
             }
-        }
-        Ok(term.span.start.to(end).sp(ExprCall {
-            term: term.data,
-            args,
-            method_call_syntax,
-        }))
+            Some(start.to(end).sp(args))
+        } else {
+            None
+        })
     }
     pub fn term(&mut self) -> Parse<Term> {
         Ok(if self.matches(Token::OpenParen) {
@@ -626,65 +637,84 @@ fn _expression_size() {
 }
 
 #[derive(Debug, Display, Clone, PartialEq, Eq)]
-#[display(fmt = "{}", "self.format()")]
-pub struct ExprCall {
-    pub term: Term,
-    pub args: Option<Vec<Expression>>,
-    pub method_call_syntax: bool,
-}
-
-impl ExprCall {
-    fn format(&self) -> String {
-        if let Some(args) = &self.args {
-            // if self.method_call_syntax {
-            //     format!(
-            //         "{}:{}({})",
-            //         args[0],
-            //         self.term,
-            //         args.iter()
-            //             .skip(1)
-            //             .map(ToString::to_string)
-            //             .intersperse(", ".into())
-            //             .collect::<String>()
-            //     )
-            // } else {
-            format!(
-                "{}({})",
-                self.term,
-                args.iter()
-                    .map(ToString::to_string)
-                    .intersperse(", ".into())
-                    .collect::<String>()
-            )
-        // }
-        } else {
-            self.term.to_string()
-        }
-    }
+pub enum ExprCall {
+    #[display(
+        fmt = "{}{}",
+        "term",
+        r#"args.as_ref().map(|args| args
+            .iter()
+            .map(ToString::to_string)
+            .intersperse(", ".into())
+            .collect::<String>()
+        ).map(|s| format!("({})", s)).unwrap_or_default()"#
+    )]
+    Regular {
+        term: Term,
+        args: Option<Vec<Expression>>,
+    },
+    #[display(
+        fmt = "{}{}",
+        first,
+        r#"calls.iter().map(|call| format!(
+            ":{}({})", 
+            call.term, 
+            call.args.iter().map(ToString::to_string).intersperse(", ".into()).collect::<String>()
+        )).collect::<String>()"#
+    )]
+    Method { first: Term, calls: Vec<Call> },
 }
 
 impl Node for ExprCall {
     type Child = Term;
     fn contains_ident(&self, ident: &str) -> bool {
-        self.term.contains_ident(ident)
-            || self.args.as_ref().map_or(false, |args| {
-                args.iter().any(|arg| arg.contains_ident(ident))
-            })
-    }
-    fn terms(&self) -> usize {
-        self.term.terms()
-            + self
-                .args
-                .as_ref()
-                .map_or(0, |args| args.iter().map(Node::terms).sum())
-    }
-    fn wrapping(child: Self::Child) -> Self {
-        ExprCall {
-            term: child,
-            args: None,
-            method_call_syntax: false,
+        match self {
+            ExprCall::Regular { term, args } => {
+                term.contains_ident(ident)
+                    || args.as_ref().map_or(false, |args| {
+                        args.iter().any(|expr| expr.contains_ident(ident))
+                    })
+            }
+            ExprCall::Method { first, calls } => {
+                first.contains_ident(ident)
+                    || calls.iter().any(|call| {
+                        call.term.contains_ident(ident)
+                            || call.args.iter().any(|expr| expr.contains_ident(ident))
+                    })
+            }
         }
     }
+    fn terms(&self) -> usize {
+        match self {
+            ExprCall::Regular { term, args } => {
+                term.terms()
+                    + args.as_ref().map_or(0, |args| {
+                        args.iter().map(|expr| expr.terms()).sum::<usize>()
+                    })
+            }
+            ExprCall::Method { first, calls } => {
+                first.terms()
+                    + calls
+                        .iter()
+                        .map(|call| {
+                            call.term.terms()
+                                + call.args.iter().map(|expr| expr.terms()).sum::<usize>()
+                        })
+                        .sum::<usize>()
+            }
+        }
+    }
+    fn wrapping(child: Self::Child) -> Self {
+        ExprCall::Regular {
+            term: child,
+            args: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Call {
+    pub term: Term,
+    pub args: Vec<Expression>,
 }
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, Hash)]
