@@ -23,7 +23,7 @@ pub type EvalResult<T = Value> = Result<T, EvalError>;
 
 pub type Callers = VectorSync<Path>;
 
-const RECURSION_LIMIT: usize = if cfg!(debug_assertions) { 80 } else { 300 };
+const RECURSION_LIMIT: usize = if cfg!(debug_assertions) { 70 } else { 300 };
 
 #[derive(Clone)]
 pub struct EvalState {
