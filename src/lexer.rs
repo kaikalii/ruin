@@ -22,6 +22,8 @@ pub enum Token {
     PeArcent,
     OpenParen,
     CloseParen,
+    OpenCurly,
+    CloseCurly,
     And,
     Or,
     Cmp(OpCmp),
@@ -49,6 +51,8 @@ impl Display for Token {
             Token::PeArcent => '%'.fmt(f),
             Token::OpenParen => '('.fmt(f),
             Token::CloseParen => ')'.fmt(f),
+            Token::OpenCurly => '{'.fmt(f),
+            Token::CloseCurly => '}'.fmt(f),
             Token::And => "and".fmt(f),
             Token::Or => "or".fmt(f),
             Token::Cmp(cmp) => cmp.fmt(f),
@@ -118,6 +122,8 @@ fn command_pattern() -> impl Pattern<Token = Token> {
         .or('%'.is(Token::PeArcent))
         .or('('.is(Token::OpenParen))
         .or(')'.is(Token::CloseParen))
+        .or('{'.is(Token::OpenCurly))
+        .or('}'.is(Token::CloseCurly))
         .or('.'.is(Token::Period))
         .or(','.is(Token::Comma))
         .or(':'.is(Token::Colon))

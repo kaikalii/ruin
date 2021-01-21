@@ -480,6 +480,14 @@ impl Tokens {
             None
         })
     }
+    pub fn list_or_table(&mut self) -> MaybeParse<Value> {
+        let start = if let Some(open_curly) = self.take_if(Token::OpenCurly) {
+            open_curly
+        } else {
+            return Ok(None);
+        };
+        todo!()
+    }
 }
 
 #[derive(Debug, Display, Clone, PartialEq, Eq)]
