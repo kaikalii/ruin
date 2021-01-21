@@ -1,6 +1,6 @@
 use std::io::{stdout, Write};
 
-use crate::{codebase::*, value::*};
+use crate::{codebase::*, eval::*, value::*};
 
 pub fn add_std_lib(cb: &mut Codebase) {
     cb.insert(
@@ -22,6 +22,16 @@ pub fn add_std_lib(cb: &mut Codebase) {
             println!("{}", state["message"]);
             colored::control::unset_override();
             Ok(state["seq"].clone())
+        }),
+    );
+    cb.insert(
+        "let".into(),
+        Function::new_builtin(&["val", "function"], |state| {
+            eval_function(
+                &state["function"].clone(),
+                vec![state["val"].clone()],
+                state,
+            )
         }),
     );
 }
