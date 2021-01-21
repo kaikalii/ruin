@@ -27,11 +27,8 @@ pub fn add_std_lib(cb: &mut Codebase) {
     cb.insert(
         "let".into(),
         Function::new_builtin(&["val", "function"], |state| {
-            eval_function(
-                &state["function"].clone(),
-                vec![state["val"].clone()],
-                state,
-            )
+            let function = state["function"].clone();
+            eval_function(&function, &function, vec![state["val"].clone()], state)
         }),
     );
 }

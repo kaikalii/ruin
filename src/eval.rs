@@ -11,8 +11,6 @@ pub enum EvalError {
     Math(Type),
     #[display(fmt = "Recursive value detected: {}", _0)]
     RecursiveValue(Path),
-    #[display(fmt = "Unknown value \"{}\"", _0)]
-    UnknownValue(Path),
     #[display(fmt = "Attempted to call {}, a {} value", expr, ty)]
     CallNonFunction { expr: String, ty: Type },
     #[display(fmt = "Cannot assign member of {}, a {} value", expr, ty)]
@@ -73,7 +71,7 @@ pub fn eval_rec(path: &Path, state: EvalState) -> EvalResult {
             Ok(val.as_evald().clone())
         }
     } else {
-        Err(EvalError::UnknownValue(path.clone()))
+        Ok(Value::Nil)
     }
 }
 
@@ -182,7 +180,7 @@ impl ExprCall {
                         arg_vals.push(arg.eval(state.clone())?);
                     }
                     let function = call.term.eval(state.clone())?;
-                    val = eval_function(&function, arg_vals, state.clone())?;
+                    val = eval_function(&call.term, &function, arg_vals, state.clone())?;
                 }
                 val
             }
@@ -193,7 +191,7 @@ impl ExprCall {
                     for arg in args {
                         arg_vals.push(arg.eval(state.clone())?);
                     }
-                    eval_function(&function, arg_vals, state)?
+                    eval_function(&term.to_string(), &function, arg_vals, state)?
                 } else {
                     function
                 }
@@ -202,12 +200,20 @@ impl ExprCall {
     }
 }
 
-pub fn eval_function(fexpr: &Value, args: Vec<Value>, state: EvalState) -> EvalResult {
+pub fn eval_function<T>(
+    context: &T,
+    fexpr: &Value,
+    args: Vec<Value>,
+    state: EvalState,
+) -> EvalResult
+where
+    T: std::fmt::Display,
+{
     let function = if let Value::Function(f) = fexpr.as_evald() {
         f.clone()
     } else {
         return Err(EvalError::CallNonFunction {
-            expr: fexpr.to_string(),
+            expr: context.to_string(),
             ty: fexpr.ty(),
         });
     };

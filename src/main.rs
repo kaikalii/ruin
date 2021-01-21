@@ -106,6 +106,7 @@ fn run(cb: &mut Arc<Codebase>, path: Option<Path>) {
     println!();
     if let Some(val) = cb.get(&path) {
         let res: Value = eval_function(
+            &path,
             val,
             vec![Value::Seq],
             EvalState::new(cb.clone(), Default::default()),
