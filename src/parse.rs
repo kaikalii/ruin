@@ -335,13 +335,13 @@ impl Tokens {
         Ok(span.sp(ExprAS::new(left, rights)))
     }
     pub fn expr_mdr(&mut self) -> Parse<ExprMDR> {
-        let left = self.expr_call()?;
+        let left = self.expr_not()?;
         let mut rights = Vec::new();
         while let Some(right) = self
             .matches_as(Token::Asterisk, OpMDR::Mul)
             .or_else(|| self.matches_as(Token::Slash, OpMDR::Div))
             .or_else(|| self.matches_as(Token::PeArcent, OpMDR::Rem))
-            .map(|op| self.expr_call().map(|expr| Right::new(op, expr)))
+            .map(|op| self.expr_not().map(|expr| Right::new(op, expr)))
             .transpose()?
         {
             rights.push(right);
@@ -361,18 +361,35 @@ impl Tokens {
         }
         println!("{}", self.cursor);
     }
+    pub fn expr_not(&mut self) -> Parse<ExprNot> {
+        let mut count = 0;
+        let mut start = None;
+        while let Some(not) = self.take_if(Token::Not) {
+            start = Some(not.span.start);
+            count += 1;
+        }
+        let expr = self.expr_call()?;
+        Ok(start
+            .unwrap_or(expr.span.start)
+            .to(expr.span.end)
+            .sp(ExprNot {
+                op: OpNot,
+                count,
+                expr: expr.data,
+            }))
+    }
     pub fn expr_call(&mut self) -> Parse<ExprCall> {
-        let first = self.expr_not()?;
+        let first = self.term()?;
         let mut end = first.span.end;
         let mut args: Option<Vec<Expression>> = None;
-        let (fexpr, method_call_syntax) = if self.matches(Token::Colon) {
+        let (term, method_call_syntax) = if self.matches(Token::Colon) {
             let span = first.span;
             args = Some(vec![ExprOr::wrapping(span.sp(ExprAnd::wrapping(span.sp(
-                ExprCmp::wrapping(span.sp(ExprAS::wrapping(
-                    span.sp(ExprMDR::wrapping(first.map(ExprCall::wrapping))),
-                ))),
+                ExprCmp::wrapping(span.sp(ExprAS::wrapping(span.sp(ExprMDR::wrapping(
+                    first.map(ExprCall::wrapping).map(ExprNot::wrapping),
+                ))))),
             ))))]);
-            (self.term()?.map(UnOp::wrapping), true)
+            (self.require(Self::ident, "ident")?.map(Term::Ident), true)
         } else {
             (first, false)
         };
@@ -396,32 +413,15 @@ impl Tokens {
                 }
             }
         }
-        Ok(fexpr.span.start.to(end).sp(ExprCall {
-            fexpr: fexpr.data,
+        Ok(term.span.start.to(end).sp(ExprCall {
+            term: term.data,
             args,
+            method_call_syntax,
         }))
-    }
-    pub fn expr_not(&mut self) -> Parse<ExprNot> {
-        let mut count = 0;
-        let mut start = None;
-        while let Some(not) = self.take_if(Token::Not) {
-            start = Some(not.span.start);
-            count += 1;
-        }
-        let term = self.term()?;
-        Ok(start
-            .unwrap_or(term.span.start)
-            .to(term.span.end)
-            .sp(ExprNot {
-                op: OpNot,
-                count,
-                expr: term.data,
-            }))
     }
     pub fn term(&mut self) -> Parse<Term> {
         Ok(if self.matches(Token::OpenParen) {
             let expr = self.expression()?;
-            println!("expr: {}", expr);
             self.require_token(Token::CloseParen)?;
             expr.map(Box::new).map(Term::Expr)
         } else if let Some(num) = self.num()? {
@@ -541,13 +541,13 @@ impl<O, T> Right<O, T> {
     r#"(0..*count).map(|_| "not ").collect::<String>()"#,
     expr
 )]
-pub struct UnOp<O, T> {
+pub struct UnExpr<O, T> {
     pub op: O,
     pub count: usize,
     pub expr: T,
 }
 
-impl<O, T> Node for UnOp<O, T>
+impl<O, T> Node for UnExpr<O, T>
 where
     T: Node,
     O: Default,
@@ -560,7 +560,7 @@ where
         self.expr.terms()
     }
     fn wrapping(child: Self::Child) -> Self {
-        UnOp {
+        UnExpr {
             op: O::default(),
             count: 0,
             expr: child,
@@ -575,7 +575,7 @@ pub struct OpOr;
 #[display(fmt = "and")]
 pub struct OpAnd;
 #[derive(Debug, Display, Clone, PartialEq, Eq, Default)]
-#[display(fmt = "and")]
+#[display(fmt = "not")]
 pub struct OpNot;
 
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
@@ -617,7 +617,8 @@ pub type ExprOr = BinExpr<OpOr, ExprAnd>;
 pub type ExprAnd = BinExpr<OpAnd, ExprCmp>;
 pub type ExprCmp = BinExpr<OpCmp, ExprAS>;
 pub type ExprAS = BinExpr<OpAS, ExprMDR>;
-pub type ExprMDR = BinExpr<OpMDR, ExprCall>;
+pub type ExprMDR = BinExpr<OpMDR, ExprNot>;
+pub type ExprNot = UnExpr<OpNot, ExprCall>;
 
 fn _expression_size() {
     #[allow(invalid_value)]
@@ -625,28 +626,53 @@ fn _expression_size() {
 }
 
 #[derive(Debug, Display, Clone, PartialEq, Eq)]
-#[display(
-    fmt = "{}{}",
-    fexpr,
-    r#"args.as_ref().map(
-        |args| format!("({})", args.iter().map(ToString::to_string).intersperse(", ".into()).collect::<String>())
-    ).unwrap_or_default()"#
-)]
+#[display(fmt = "{}", "self.format()")]
 pub struct ExprCall {
-    pub fexpr: ExprNot,
+    pub term: Term,
     pub args: Option<Vec<Expression>>,
+    pub method_call_syntax: bool,
+}
+
+impl ExprCall {
+    fn format(&self) -> String {
+        if let Some(args) = &self.args {
+            // if self.method_call_syntax {
+            //     format!(
+            //         "{}:{}({})",
+            //         args[0],
+            //         self.term,
+            //         args.iter()
+            //             .skip(1)
+            //             .map(ToString::to_string)
+            //             .intersperse(", ".into())
+            //             .collect::<String>()
+            //     )
+            // } else {
+            format!(
+                "{}({})",
+                self.term,
+                args.iter()
+                    .map(ToString::to_string)
+                    .intersperse(", ".into())
+                    .collect::<String>()
+            )
+        // }
+        } else {
+            self.term.to_string()
+        }
+    }
 }
 
 impl Node for ExprCall {
-    type Child = ExprNot;
+    type Child = Term;
     fn contains_ident(&self, ident: &str) -> bool {
-        self.fexpr.contains_ident(ident)
+        self.term.contains_ident(ident)
             || self.args.as_ref().map_or(false, |args| {
                 args.iter().any(|arg| arg.contains_ident(ident))
             })
     }
     fn terms(&self) -> usize {
-        self.fexpr.terms()
+        self.term.terms()
             + self
                 .args
                 .as_ref()
@@ -654,13 +680,12 @@ impl Node for ExprCall {
     }
     fn wrapping(child: Self::Child) -> Self {
         ExprCall {
-            fexpr: child,
+            term: child,
             args: None,
+            method_call_syntax: false,
         }
     }
 }
-
-pub type ExprNot = UnOp<OpNot, Term>;
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, Hash)]
 #[display(

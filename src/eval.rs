@@ -172,15 +172,15 @@ impl ExprMDR {
 
 impl ExprCall {
     pub fn eval(&self, state: EvalState) -> EvalResult {
-        let fexpr = self.fexpr.eval(state.clone())?;
+        let term = self.term.eval(state.clone())?;
         if let Some(args) = &self.args {
             let mut arg_vals = Vec::with_capacity(args.len());
             for arg in args {
                 arg_vals.push(arg.eval(state.clone())?);
             }
-            eval_function(&fexpr, arg_vals, state)
+            eval_function(&term, arg_vals, state)
         } else {
-            Ok(fexpr)
+            Ok(term)
         }
     }
 }
