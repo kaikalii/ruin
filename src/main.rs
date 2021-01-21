@@ -19,7 +19,6 @@ use colored::Colorize;
 use codebase::Codebase;
 use eval::*;
 use parse::{parse, Command, Path};
-use value::*;
 
 fn main() {
     color_backtrace::install();
@@ -66,10 +65,8 @@ fn handle_input(input: &str, cb: &mut Arc<Codebase>, eval: bool) {
             }
             Command::Eval(expr) => {
                 println!();
-                match expr.eval(EvalState::new(cb.clone(), once(Path::GLOBAL).collect())) {
-                    Ok(val) => println!("{}", val),
-                    Err(e) => println!("{}", e.to_string().red()),
-                }
+                let val = expr.eval(EvalState::new(cb.clone(), once(Path::GLOBAL).collect()));
+                println!("{}", val);
                 println!();
             }
         },
@@ -104,17 +101,8 @@ fn load(cb: &mut Arc<Codebase>, path: Option<Path>, eval: bool) -> io::Result<()
 fn run(cb: &mut Arc<Codebase>, path: Option<Path>) {
     let path = path.unwrap_or_else(|| "main".into());
     println!();
-    if let Some(val) = cb.get(&path) {
-        let res: Value = eval_function(
-            &path,
-            val,
-            vec![Value::Seq],
-            EvalState::new(cb.clone(), Default::default()),
-        )
-        .into();
-        if let Value::Error(_) = res {
-            println!("{}", res);
-        }
+    if let Some(_val) = cb.get(&path) {
+        todo!()
     } else {
         println!("Unknown function: {}", path)
     }

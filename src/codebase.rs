@@ -88,7 +88,7 @@ impl Codebase {
         }
     }
     fn eval_path(self: &mut Arc<Self>, path: &Path) {
-        let evald = eval(self, path);
+        let evald = eval_path(self, path);
         if let Some(val) = self.as_mut().vals.get_mut(path) {
             if let Value::Expression { val, .. } = val {
                 *val = Some(evald.into());

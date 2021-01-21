@@ -145,7 +145,7 @@ pub struct Function {
 
 impl Function {
     pub fn contains_ident(&self, ident: &str) -> bool {
-        if let FunctionBody::Expr(expr) = &self.body {
+        if let FunctionBody::Expr { expr, .. } = &self.body {
             expr.contains_ident(ident) && !self.args.iter().any(|i| i == ident)
         } else {
             false
@@ -155,7 +155,7 @@ impl Function {
     where
         I: IntoIterator,
         I::Item: AsRef<str>,
-        F: Fn(EvalState) -> EvalResult + Send + Sync + 'static,
+        F: Fn(&mut Stack) -> EvalResult + Send + Sync + 'static,
     {
         Function {
             args: args.into_iter().map(|s| s.as_ref().into()).collect(),
@@ -183,17 +183,23 @@ impl Function {
     }
 }
 
+pub type BuiltinFunction = Arc<dyn Fn(&mut Stack) -> EvalResult + Send + Sync + 'static>;
+
 #[derive(Display, Clone)]
 pub enum FunctionBody {
-    Expr(Expression),
+    #[display(fmt = "{}", expr)]
+    Expr {
+        expr: Expression,
+        instrs: Option<Instrs>,
+    },
     #[display(fmt = "built-in")]
-    Builtin(Arc<dyn Fn(EvalState) -> EvalResult + Send + Sync + 'static>),
+    Builtin(BuiltinFunction),
 }
 
 impl Debug for FunctionBody {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            FunctionBody::Expr(expr) => expr.fmt(f),
+            FunctionBody::Expr { expr, .. } => expr.fmt(f),
             FunctionBody::Builtin(_) => write!(f, "built-in"),
         }
     }
@@ -201,13 +207,15 @@ impl Debug for FunctionBody {
 
 impl From<Expression> for FunctionBody {
     fn from(expr: Expression) -> Self {
-        FunctionBody::Expr(expr)
+        FunctionBody::Expr { expr, instrs: None }
     }
 }
 
 impl PartialEq for FunctionBody {
     fn eq(&self, other: &Self) -> bool {
-        if let (FunctionBody::Expr(a), FunctionBody::Expr(b)) = (self, other) {
+        if let (FunctionBody::Expr { expr: a, .. }, FunctionBody::Expr { expr: b, .. }) =
+            (self, other)
+        {
             a == b
         } else {
             false
