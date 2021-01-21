@@ -135,16 +135,12 @@ pub enum Key {
 }
 
 #[derive(Debug, Display, Clone, PartialEq, Eq)]
-#[display(
-    fmt = "{}({}) {}",
-    "\"fn\".magenta()",
-    "args.iter().map(|s| s.as_str()).intersperse(\", \").collect::<String>()",
-    body
-)]
+#[display(fmt = "{}", "self.format()")]
 pub struct Function {
     pub args: Vec<String>,
     pub body: FunctionBody,
     pub env: RedBlackTreeMapSync<String, Value>,
+    pub bar: bool,
 }
 
 impl Function {
@@ -165,7 +161,25 @@ impl Function {
             args: args.into_iter().map(|s| s.as_ref().into()).collect(),
             body: FunctionBody::Builtin(Arc::new(f)),
             env: RedBlackTreeMapSync::default(),
+            bar: false,
         }
+    }
+    fn format(&self) -> String {
+        format!(
+            "{}{}{} {}",
+            if self.bar {
+                "|".normal().to_string()
+            } else {
+                format!("{}{}", "fn".magenta(), '(')
+            },
+            self.args
+                .iter()
+                .map(|s| s.as_str())
+                .intersperse(", ")
+                .collect::<String>(),
+            if self.bar { "|" } else { ")" },
+            self.body
+        )
     }
 }
 

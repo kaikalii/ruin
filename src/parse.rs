@@ -452,8 +452,15 @@ impl Tokens {
         })
     }
     pub fn inline_function(&mut self) -> MaybeParse<Function> {
-        Ok(if let Some(fn_token) = self.take_if(Token::Fn) {
-            self.require_token(Token::OpenParen)?;
+        let mut bar = false;
+        let start = self.take_if(Token::Fn).or_else(|| {
+            bar = true;
+            self.take_if(Token::Bar)
+        });
+        Ok(if let Some(start) = start {
+            if !bar {
+                self.require_token(Token::OpenParen)?;
+            }
             let mut args = Vec::new();
             while let Some(ident) = self.ident()? {
                 args.push(ident.data);
@@ -461,12 +468,13 @@ impl Tokens {
                     break;
                 }
             }
-            self.require_token(Token::CloseParen)?;
+            self.require_token(if bar { Token::Bar } else { Token::CloseParen })?;
             let expr = self.expression()?;
-            Some((fn_token.span | expr.span).sp(Function {
+            Some((start.span | expr.span).sp(Function {
                 args,
                 body: expr.data.into(),
                 env: Default::default(),
+                bar,
             }))
         } else {
             None
