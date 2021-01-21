@@ -3,11 +3,12 @@ mod eval;
 mod lexer;
 mod num;
 mod parse;
+mod stdlib;
 mod value;
 
 use std::{
     fs,
-    io::{stdin, stdout, BufRead, Write},
+    io::{self, stdin, stdout, BufRead, Write},
     iter::once,
     sync::Arc,
 };
@@ -23,7 +24,10 @@ use value::*;
 fn main() {
     color_backtrace::install();
 
-    let mut cb = Arc::new(Codebase::default());
+    let mut cb = Codebase::default();
+    stdlib::add_std_lib(&mut cb);
+    let mut cb = Arc::new(cb);
+    let _ = load(&mut cb, None, true);
     print_prompt();
     for input in stdin().lock().lines().filter_map(Result::ok) {
         handle_input(&input, &mut cb, true);
@@ -45,18 +49,15 @@ fn handle_input(input: &str, cb: &mut Arc<Codebase>, eval: bool) {
             Command::Command => {
                 let args = once("ruin").chain(input[1..].split_whitespace());
                 match App::try_parse_from(args) {
-                    Ok(App::Load { path }) => match fs::read_to_string(path.as_path_buf()) {
-                        Ok(text) => {
-                            for line in text.lines() {
-                                handle_input(line, cb, false);
-                            }
-                            if eval {
-                                cb.eval_all();
-                                cb.print(10);
+                    Ok(App::Load { path }) => {
+                        if load(cb, path.clone(), true).is_err() {
+                            if let Some(path) = path {
+                                println!("Unable to open file with path {}", path)
+                            } else {
+                                println!("Unable to open main file")
                             }
                         }
-                        Err(_) => println!("Unable to open file with path {}", path),
-                    },
+                    }
                     Ok(App::Run { path }) => run(cb, path),
                     Err(e) => println!("{}", e),
                 }
@@ -81,19 +82,38 @@ fn print_prompt() {
 
 #[derive(Clap)]
 enum App {
-    Load { path: Path },
-    Run { path: Path },
+    Load { path: Option<Path> },
+    Run { path: Option<Path> },
 }
 
-fn run(cb: &mut Arc<Codebase>, path: Path) {
+fn load(cb: &mut Arc<Codebase>, path: Option<Path>, eval: bool) -> io::Result<()> {
+    let path = path.unwrap_or_else(|| "main".into());
+    let text = fs::read_to_string(path.as_path_buf())?;
+    for line in text.lines() {
+        handle_input(line, cb, false);
+    }
+    if eval {
+        cb.eval_all();
+        cb.print(10);
+    }
+    Ok(())
+}
+
+fn run(cb: &mut Arc<Codebase>, path: Option<Path>) {
+    let path = path.unwrap_or_else(|| "main".into());
+    println!();
     if let Some(val) = cb.get(&path) {
-        let res = eval_function(
+        let res: Value = eval_function(
             val,
             vec![Value::Seq],
             EvalState::new(cb.clone(), Default::default()),
-        );
-        println!("\n{}\n", Value::from(res));
+        )
+        .into();
+        if let Value::Error(_) = res {
+            println!("{}", res);
+        }
     } else {
         println!("Unknown function: {}", path)
     }
+    println!();
 }

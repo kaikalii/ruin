@@ -1,4 +1,4 @@
-use std::{iter::repeat, sync::Arc};
+use std::{iter::repeat, ops::Index, sync::Arc};
 
 use derive_more::Display;
 use rpds::VectorSync;
@@ -17,9 +17,11 @@ pub enum EvalError {
     CallNonFunction { expr: String, ty: Type },
     #[display(fmt = "Cannot assign member of {}, a {} value", expr, ty)]
     CantAssign { expr: String, ty: Type },
+    #[display(fmt = "Expected {} but found {}", expected, found)]
+    TypeMismatch { expected: Type, found: Type },
 }
 
-pub type EvalResult = Result<Value, EvalError>;
+pub type EvalResult<T = Value> = Result<T, EvalError>;
 
 pub type Callers = VectorSync<Path>;
 
@@ -42,6 +44,16 @@ impl EvalState {
     }
     pub fn depth(self, depth: usize) -> Self {
         EvalState { depth, ..self }
+    }
+}
+
+impl<P> Index<P> for EvalState
+where
+    P: Into<Path>,
+{
+    type Output = Value;
+    fn index(&self, path: P) -> &Self::Output {
+        &self.cb[path]
     }
 }
 
@@ -244,5 +256,14 @@ impl Term {
             Term::String(s) => Value::String(s.clone()),
             Term::Function(f) => Value::Function(f.clone().into()),
         })
+    }
+}
+
+impl FunctionBody {
+    pub fn eval(&self, state: EvalState) -> EvalResult {
+        match self {
+            FunctionBody::Expr(expr) => expr.eval(state),
+            FunctionBody::Builtin(f) => f(state),
+        }
     }
 }

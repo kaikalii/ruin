@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::Index, sync::Arc};
 
 use colored::Colorize;
 use indexmap::IndexMap;
@@ -100,12 +100,11 @@ impl Codebase {
                 if let Some(child_val) = self.vals.get(path).cloned() {
                     if let Some(parent_val) = self.as_mut().vals.get_mut(&parent) {
                         match parent_val.as_evald_mut() {
-                            Value::Function(function) => match Arc::make_mut(function) {
-                                Function::Lang(function) => {
-                                    function.env =
-                                        function.env.insert(path.name.clone().unwrap(), child_val);
-                                }
-                            },
+                            Value::Function(function) => {
+                                let function = Arc::make_mut(function);
+                                function.env =
+                                    function.env.insert(path.name.clone().unwrap(), child_val);
+                            }
                             Value::Table(table) => {
                                 *table = table
                                     .insert(Key::String(path.name.clone().unwrap()), child_val);
@@ -121,5 +120,18 @@ impl Codebase {
                 }
             }
         }
+    }
+}
+
+impl<P> Index<P> for Codebase
+where
+    P: Into<Path>,
+{
+    type Output = Value;
+    fn index(&self, path: P) -> &Self::Output {
+        let path = path.into();
+        self.vals
+            .get(&path)
+            .unwrap_or_else(|| panic!("Unknown val: {}", path))
     }
 }

@@ -452,14 +452,11 @@ impl Tokens {
             }
             self.require_token(Token::CloseParen)?;
             let expr = self.expression()?;
-            Some(
-                (fn_token.span | expr.span).sp(LangFunction {
-                    args,
-                    body: expr.data,
-                    env: Default::default(),
-                }
-                .into()),
-            )
+            Some((fn_token.span | expr.span).sp(Function {
+                args,
+                body: expr.data.into(),
+                env: Default::default(),
+            }))
         } else {
             None
         })

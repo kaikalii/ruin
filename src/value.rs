@@ -1,13 +1,16 @@
 #![allow(dead_code)]
 
-use std::sync::Arc;
+use std::{
+    fmt::{self, Debug, Formatter},
+    sync::Arc,
+};
 
 use colored::Colorize;
 use derive_more::Display;
 use itertools::Itertools;
 use rpds::{RedBlackTreeMapSync, VectorSync};
 
-use crate::{eval::EvalError, num::Num, parse::*};
+use crate::{eval::*, num::Num, parse::*};
 
 pub type List = VectorSync<Value>;
 pub type Table = RedBlackTreeMapSync<Key, Value>;
@@ -93,6 +96,15 @@ impl Value {
             self
         }
     }
+    pub fn seq(&self) -> EvalResult<()> {
+        match self.ty() {
+            Type::Seq => Ok(()),
+            found => Err(EvalError::TypeMismatch {
+                expected: Type::Seq,
+                found,
+            }),
+        }
+    }
 }
 
 impl From<Expression> for Value {
@@ -101,6 +113,12 @@ impl From<Expression> for Value {
             expr: expr.into(),
             val: None,
         }
+    }
+}
+
+impl From<Function> for Value {
+    fn from(f: Function) -> Self {
+        Value::Function(Arc::new(f))
     }
 }
 
@@ -116,55 +134,66 @@ pub enum Key {
     String(String),
 }
 
-#[derive(Debug, Display, Clone)]
+#[derive(Debug, Display, Clone, PartialEq, Eq)]
 #[display(
     fmt = "{}({}) {}",
     "\"fn\".magenta()",
     "args.iter().map(|s| s.as_str()).intersperse(\", \").collect::<String>()",
     body
 )]
-pub struct LangFunction {
+pub struct Function {
     pub args: Vec<String>,
-    pub body: Expression,
+    pub body: FunctionBody,
     pub env: RedBlackTreeMapSync<String, Value>,
-}
-
-impl PartialEq for LangFunction {
-    fn eq(&self, other: &Self) -> bool {
-        self.args == other.args && self.body == other.body && self.env == other.env
-    }
-}
-
-impl Eq for LangFunction {}
-
-impl LangFunction {
-    pub fn contains_ident(&self, ident: &str) -> bool {
-        self.body.contains_ident(ident) && !self.args.iter().any(|i| i == ident)
-    }
-}
-
-#[derive(Debug, Display, Clone)]
-pub enum Function {
-    Lang(LangFunction),
 }
 
 impl Function {
     pub fn contains_ident(&self, ident: &str) -> bool {
-        match self {
-            Function::Lang(f) => f.contains_ident(ident),
+        if let FunctionBody::Expr(expr) = &self.body {
+            expr.contains_ident(ident) && !self.args.iter().any(|i| i == ident)
+        } else {
+            false
+        }
+    }
+    pub fn new_builtin<I, F>(args: I, f: F) -> Self
+    where
+        I: IntoIterator,
+        I::Item: AsRef<str>,
+        F: Fn(EvalState) -> EvalResult + Send + Sync + 'static,
+    {
+        Function {
+            args: args.into_iter().map(|s| s.as_ref().into()).collect(),
+            body: FunctionBody::Builtin(Arc::new(f)),
+            env: RedBlackTreeMapSync::default(),
         }
     }
 }
 
-impl From<LangFunction> for Function {
-    fn from(lf: LangFunction) -> Self {
-        Function::Lang(lf)
+#[derive(Display, Clone)]
+pub enum FunctionBody {
+    Expr(Expression),
+    #[display(fmt = "built-in")]
+    Builtin(Arc<dyn Fn(EvalState) -> EvalResult + Send + Sync + 'static>),
+}
+
+impl Debug for FunctionBody {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            FunctionBody::Expr(expr) => expr.fmt(f),
+            FunctionBody::Builtin(_) => write!(f, "built-in"),
+        }
     }
 }
 
-impl PartialEq for Function {
+impl From<Expression> for FunctionBody {
+    fn from(expr: Expression) -> Self {
+        FunctionBody::Expr(expr)
+    }
+}
+
+impl PartialEq for FunctionBody {
     fn eq(&self, other: &Self) -> bool {
-        if let (Function::Lang(a), Function::Lang(b)) = (self, other) {
+        if let (FunctionBody::Expr(a), FunctionBody::Expr(b)) = (self, other) {
             a == b
         } else {
             false
@@ -172,7 +201,7 @@ impl PartialEq for Function {
     }
 }
 
-impl Eq for Function {}
+impl Eq for FunctionBody {}
 
 #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Type {
