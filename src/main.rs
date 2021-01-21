@@ -27,7 +27,9 @@ fn main() {
     let mut cb = Codebase::default();
     stdlib::add_std_lib(&mut cb);
     let mut cb = Arc::new(cb);
-    let _ = load(&mut cb, None, true);
+    let _ = load(&mut cb, None, false);
+    cb.eval_all();
+    cb.print(usize::MAX);
     print_prompt();
     for input in stdin().lock().lines().filter_map(Result::ok) {
         handle_input(&input, &mut cb, true);
