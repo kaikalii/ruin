@@ -10,7 +10,7 @@ use derive_more::Display;
 use itertools::Itertools;
 use rpds::{RedBlackTreeMapSync, VectorSync};
 
-use crate::{compile::*, num::Num, parse::*};
+use crate::{ast::*, compile::*, num::Num};
 
 pub type List = VectorSync<Value>;
 pub type Table = RedBlackTreeMapSync<Key, Value>;

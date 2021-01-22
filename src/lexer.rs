@@ -5,7 +5,7 @@ use std::{
 
 use tokenate::*;
 
-use crate::{num::Num, parse::OpCmp};
+use crate::{ast::OpCmp, num::Num};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {

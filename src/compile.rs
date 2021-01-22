@@ -3,7 +3,7 @@ use std::{ops::Index, sync::Arc};
 use colored::Colorize;
 use derive_more::Display;
 
-use crate::{codebase::*, parse::*, value::*};
+use crate::{ast::*, codebase::*, value::*};
 
 #[derive(Debug, Display, Clone)]
 pub enum EvalError {

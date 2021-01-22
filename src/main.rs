@@ -1,3 +1,4 @@
+mod ast;
 mod codebase;
 mod compile;
 mod lexer;
@@ -17,9 +18,10 @@ use std::{
 use clap::Clap;
 use colored::Colorize;
 
+use ast::Command;
 use codebase::Codebase;
 use compile::*;
-use parse::{parse, Command};
+use parse::parse;
 use value::Value;
 
 fn main() {
