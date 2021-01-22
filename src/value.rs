@@ -102,15 +102,6 @@ impl Value {
             self
         }
     }
-    pub fn seq(&self) -> EvalResult<()> {
-        match self.ty() {
-            Type::Seq => Ok(()),
-            found => Err(EvalError::TypeMismatch {
-                expected: Type::Seq,
-                found,
-            }),
-        }
-    }
 }
 
 impl From<Expression> for Value {

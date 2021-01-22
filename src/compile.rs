@@ -152,10 +152,20 @@ impl From<Instrs> for Instr {
 
 pub type Instrs = Vec<Instr>;
 
-#[derive(Default)]
 pub struct Stack {
     vals: Vec<Pushed>,
     args: ArgValStack,
+    free_seq: bool,
+}
+
+impl Default for Stack {
+    fn default() -> Self {
+        Stack {
+            vals: Vec::new(),
+            args: ArgValStack::new(),
+            free_seq: true,
+        }
+    }
 }
 
 impl Stack {
@@ -170,6 +180,19 @@ impl Stack {
     pub fn pop2(&mut self) -> (Value, Value) {
         let second = self.pop();
         (self.pop(), second)
+    }
+    pub fn pop_seq(&mut self) -> EvalResult<Value> {
+        if let Some(Pushed::Value(Value::Seq)) = self.vals.last() {
+            Ok(self.pop())
+        } else if self.free_seq {
+            self.free_seq = false;
+            Ok(Value::Seq)
+        } else {
+            Err(EvalError::TypeMismatch {
+                expected: Type::Seq,
+                found: self.pop().ty(),
+            })
+        }
     }
     #[track_caller]
     pub fn pop_delayed(&mut self) -> Instrs {
