@@ -356,13 +356,14 @@ impl Instr {
 
 pub fn compile_ident(ident: &str, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
     match stack_arg(&state.args, ident) {
-        Ok(index) => {
-            instrs.push(Instr::Arg(index));
-            return Ok(());
-        }
+        Ok(index) => instrs.push(Instr::Arg(index)),
         Err(e) => {
             if state.callers.iter().any(|name| name == ident) {
-                return Err(EvalError::RecursiveValue(ident.into()));
+                if state.function_depth == 0 {
+                    return Err(EvalError::RecursiveValue(ident.into()));
+                } else if let Some(_val) = state.cb.get(ident).cloned() {
+                    todo!()
+                }
             } else if let Some(val) = state.cb.get(ident).cloned() {
                 if let Value::Expression { val, expr } = val {
                     if let Some(val) = val {
@@ -526,6 +527,7 @@ impl Evalable for Term {
                 }
                 // Push the function's args to the state's arg stack
                 state.args.push(function.args.clone());
+                state.function_depth += 1;
                 // Access the function's instructions
                 let mut function_instrs = function_instrs.lock().unwrap();
                 let function_instrs = function_instrs.get_or_insert_with(Vec::new);
@@ -534,6 +536,7 @@ impl Evalable for Term {
                 body.compile(state, function_instrs)?;
                 // Pop the function's args
                 state.args.pop();
+                state.function_depth -= 1;
                 // Add the function as a push instruction
                 instrs.push(Value::Function((*function).clone().into()).into());
             }
