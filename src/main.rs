@@ -10,6 +10,7 @@ use std::{
     fs,
     io::{self, stdin, stdout, BufRead, Write},
     iter::once,
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -19,6 +20,7 @@ use colored::Colorize;
 use codebase::Codebase;
 use compile::*;
 use parse::{parse, Command};
+use value::Value;
 
 fn main() {
     color_backtrace::install();
@@ -86,7 +88,7 @@ enum App {
 }
 
 fn load(cb: &mut Arc<Codebase>, path: Option<String>, eval: bool) -> io::Result<()> {
-    let path = path.unwrap_or_else(|| "main".into());
+    let path = PathBuf::from(path.unwrap_or_else(|| "main".into())).with_extension("ruin");
     let text = fs::read_to_string(path)?;
     for line in text.lines() {
         handle_input(line, cb, false);
@@ -101,7 +103,9 @@ fn load(cb: &mut Arc<Codebase>, path: Option<String>, eval: bool) -> io::Result<
 fn run(cb: &mut Arc<Codebase>, path: Option<String>) {
     let path = path.unwrap_or_else(|| "main".into());
     println!();
-    let val = eval_ident(cb, &path);
-    println!("{}", val);
+    let function = eval_ident(cb, &path);
+    if let Err(e) = eval_function(function, vec![Value::Seq]).ok() {
+        println!("{}", e);
+    }
     println!();
 }

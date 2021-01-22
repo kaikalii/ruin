@@ -85,7 +85,19 @@ pub fn eval_ident(cb: &Arc<Codebase>, ident: &str) -> Value {
     if let Err(e) = res {
         return e.into();
     }
-    Stack::default().run(&instrs)
+    Stack::new().run(&instrs)
+}
+
+pub fn eval_function(function: Value, args: Vec<Value>) -> Value {
+    let mut stack = Stack::new();
+    let len = args.len();
+    for val in args.into_iter().chain(Some(function)) {
+        stack.push(val);
+    }
+    Instr::Call(len)
+        .execute(&mut stack)
+        .map(|_| stack.pop())
+        .unwrap_or_else(Into::into)
 }
 
 pub enum Pushed {
@@ -147,13 +159,17 @@ pub struct Stack {
 }
 
 impl Stack {
+    pub fn new() -> Self {
+        Default::default()
+    }
     #[track_caller]
     pub fn pop(&mut self) -> Value {
         self.vals.pop().expect("Stack is empty").unwrap_value()
     }
     #[track_caller]
     pub fn pop2(&mut self) -> (Value, Value) {
-        (self.pop(), self.pop())
+        let second = self.pop();
+        (self.pop(), second)
     }
     #[track_caller]
     pub fn pop_delayed(&mut self) -> Instrs {
@@ -328,7 +344,7 @@ pub trait Evalable {
         let mut instrs = Instrs::new();
         match self.compile(state, &mut instrs) {
             Ok(()) => {
-                let mut stack = Stack::default();
+                let mut stack = Stack::new();
                 if let Err(e) = stack.execute(&instrs) {
                     return e.into();
                 }

@@ -77,6 +77,12 @@ impl Value {
             _ => false,
         }
     }
+    pub fn ok(self) -> EvalResult<Self> {
+        match self {
+            Value::Error(e) => Err(EvalError::Value(e)),
+            val => Ok(val),
+        }
+    }
     pub fn reset(&mut self) {
         if let Value::Expression { val, .. } = self {
             *val = None;
