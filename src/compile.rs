@@ -69,14 +69,16 @@ pub struct CompileState {
     pub cb: Arc<Codebase>,
     pub callers: Callers,
     pub args: ArgNameStack,
+    pub function_depth: usize,
 }
 
 impl CompileState {
-    pub fn new(cb: Arc<Codebase>, callers: Callers) -> Self {
+    pub fn new(cb: Arc<Codebase>) -> Self {
         CompileState {
             cb,
-            callers,
+            callers: Callers::new(),
             args: ArgNameStack::default(),
+            function_depth: 0,
         }
     }
 }
@@ -93,7 +95,7 @@ where
 
 pub fn eval_ident(cb: &Arc<Codebase>, ident: &str, seq: bool) -> Value {
     let mut instrs = Instrs::new();
-    let mut state = CompileState::new(cb.clone(), Default::default());
+    let mut state = CompileState::new(cb.clone());
     if let Err(e) = compile_ident(ident, &mut state, &mut instrs) {
         return e.into();
     }

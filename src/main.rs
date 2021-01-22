@@ -67,7 +67,7 @@ fn handle_input(input: &str, cb: &mut Arc<Codebase>, eval: bool) {
             }
             Command::Eval(expr) => {
                 println!();
-                let val = expr.eval(&mut CompileState::new(cb.clone(), Default::default()), true);
+                let val = expr.eval(&mut CompileState::new(cb.clone()), true);
                 println!("{}", val);
                 println!();
             }
