@@ -2,7 +2,6 @@ use std::{ops::Index, sync::Arc};
 
 use colored::Colorize;
 use derive_more::Display;
-use rpds::VectorSync;
 
 use crate::{codebase::*, parse::*, value::*};
 
@@ -40,19 +39,21 @@ pub enum EvalError {
     },
     #[display(fmt = "Unknown value: {:?}", _0)]
     UnknownValue(String),
+    #[display(fmt = "Expected argument")]
+    ExpectedArg,
     Value(String),
 }
 
 pub type EvalResult<T = ()> = Result<T, EvalError>;
 
-pub type Callers = VectorSync<String>;
+pub type Callers = Vec<String>;
 
-pub type ArgNameStack = VectorSync<Vec<String>>;
+pub type ArgNameStack = Vec<Vec<String>>;
 pub type ArgValStack = Vec<Vec<Value>>;
 
 pub type ArgIndex = (usize, usize);
 
-fn stack_arg(arg_stack: &ArgNameStack, ident: &str) -> EvalResult<ArgIndex> {
+fn stack_arg(arg_stack: &[Vec<String>], ident: &str) -> EvalResult<ArgIndex> {
     for (i, args) in arg_stack.iter().enumerate() {
         for (j, arg) in args.iter().enumerate() {
             if ident == arg {
@@ -92,9 +93,8 @@ where
 
 pub fn eval_ident(cb: &Arc<Codebase>, ident: &str) -> Value {
     let mut instrs = Instrs::new();
-    let state = CompileState::new(cb.clone(), Default::default());
-    let res = compile_ident(ident, &state, &mut instrs);
-    if let Err(e) = res {
+    let mut state = CompileState::new(cb.clone(), Default::default());
+    if let Err(e) = compile_ident(ident, &mut state, &mut instrs) {
         return e.into();
     }
     Stack::new().run(&instrs)
@@ -108,7 +108,7 @@ pub fn eval_function(function: Value, args: Vec<Value>) -> Value {
     }
     Instr::Call(len)
         .execute(&mut stack)
-        .map(|_| stack.pop())
+        .and_then(|_| stack.pop())
         .unwrap_or_else(Into::into)
 }
 
@@ -185,30 +185,36 @@ impl Stack {
         Default::default()
     }
     #[track_caller]
-    pub fn pop(&mut self) -> Value {
-        self.vals.pop().expect("Stack is empty").unwrap_value()
+    pub fn pop(&mut self) -> EvalResult<Value> {
+        self.vals
+            .pop()
+            .ok_or(EvalError::ExpectedArg)
+            .map(Pushed::unwrap_value)
     }
     #[track_caller]
-    pub fn pop2(&mut self) -> (Value, Value) {
-        let second = self.pop();
-        (self.pop(), second)
+    pub fn pop2(&mut self) -> EvalResult<(Value, Value)> {
+        let second = self.pop()?;
+        Ok((self.pop()?, second))
     }
     pub fn pop_seq(&mut self) -> EvalResult<Value> {
         if let Some(Pushed::Value(Value::Seq)) = self.vals.last() {
-            Ok(self.pop())
+            self.pop()
         } else if self.free_seq {
             self.free_seq = false;
             Ok(Value::Seq)
         } else {
             Err(EvalError::TypeMismatch {
                 expected: Type::Seq,
-                found: self.pop().ty(),
+                found: self.pop()?.ty(),
             })
         }
     }
     #[track_caller]
-    pub fn pop_delayed(&mut self) -> Instrs {
-        self.vals.pop().expect("Stack is empty").unwrap_delayed()
+    pub fn pop_delayed(&mut self) -> EvalResult<Instrs> {
+        self.vals
+            .pop()
+            .ok_or(EvalError::ExpectedArg)
+            .map(Pushed::unwrap_delayed)
     }
     pub fn push(&mut self, val: Value) {
         self.vals.push(Pushed::Value(val));
@@ -233,7 +239,7 @@ impl Stack {
         if let Err(e) = self.execute(instrs) {
             return e.into();
         }
-        self.pop()
+        self.pop().unwrap_or_else(Into::into)
     }
 }
 
@@ -244,8 +250,8 @@ impl Instr {
             Instr::Delayed(instrs) => stack.push_delayed(instrs.clone()),
             Instr::Arg(index) => stack.push(stack.arg(*index)),
             Instr::Or => {
-                let left = stack.pop();
-                let right = stack.pop_delayed();
+                let left = stack.pop()?;
+                let right = stack.pop_delayed()?;
                 if left.is_truth() {
                     stack.push(left);
                 } else {
@@ -253,8 +259,8 @@ impl Instr {
                 }
             }
             Instr::And => {
-                let left = stack.pop();
-                let right = stack.pop_delayed();
+                let left = stack.pop()?;
+                let right = stack.pop_delayed()?;
                 if left.is_truth() {
                     stack.execute(&right)?;
                 } else {
@@ -262,7 +268,7 @@ impl Instr {
                 }
             }
             Instr::Cmp(op) => {
-                let (left, right) = stack.pop2();
+                let (left, right) = stack.pop2()?;
                 let val = match op {
                     OpCmp::Is => Value::Bool(left == right),
                     OpCmp::Isnt => Value::Bool(left != right),
@@ -281,7 +287,7 @@ impl Instr {
                 stack.push(val);
             }
             Instr::AS(op) => {
-                let (left, right) = stack.pop2();
+                let (left, right) = stack.pop2()?;
                 let val = match (left, right) {
                     (Value::Error(e), _) | (_, Value::Error(e)) => Value::Error(e),
                     (Value::Num(a), Value::Num(b)) => Value::Num(match op {
@@ -293,7 +299,7 @@ impl Instr {
                 stack.push(val);
             }
             Instr::MDR(op) => {
-                let (left, right) = stack.pop2();
+                let (left, right) = stack.pop2()?;
                 let val = match (left, right) {
                     (Value::Error(e), _) | (_, Value::Error(e)) => Value::Error(e),
                     (Value::Num(a), Value::Num(b)) => Value::Num(match op {
@@ -306,11 +312,11 @@ impl Instr {
                 stack.push(val);
             }
             Instr::Not => {
-                let val = stack.pop();
+                let val = stack.pop()?;
                 stack.push(Value::Bool(!val.is_truth()));
             }
             Instr::Call(arg_count) => {
-                let fval = stack.pop();
+                let fval = stack.pop()?;
                 let function = match fval {
                     Value::Function(function) => function,
                     Value::Error(e) => return Err(EvalError::Value(e)),
@@ -326,7 +332,7 @@ impl Instr {
                     FunctionBody::Expr { instrs, .. } => {
                         let mut args = Vec::with_capacity(*arg_count);
                         for _ in 0..*arg_count {
-                            args.push(stack.pop());
+                            args.push(stack.pop()?);
                         }
                         args.reverse();
                         stack.args.push(args);
@@ -340,7 +346,7 @@ impl Instr {
     }
 }
 
-pub fn compile_ident(ident: &str, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
+pub fn compile_ident(ident: &str, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
     match stack_arg(&state.args, ident) {
         Ok(index) => {
             instrs.push(Instr::Arg(index));
@@ -354,13 +360,10 @@ pub fn compile_ident(ident: &str, state: &CompileState, instrs: &mut Instrs) -> 
                     if let Some(val) = val {
                         instrs.push((*val).into());
                     } else {
-                        instrs.push(
-                            expr.eval(&CompileState::new(
-                                state.cb.clone(),
-                                state.callers.push_back(ident.into()),
-                            ))
-                            .into(),
-                        );
+                        state.callers.push(ident.into());
+                        let val = expr.eval(state).ok()?;
+                        state.callers.pop();
+                        instrs.push(val.into());
                     }
                 } else {
                     instrs.push(val.into());
@@ -374,8 +377,8 @@ pub fn compile_ident(ident: &str, state: &CompileState, instrs: &mut Instrs) -> 
 }
 
 pub trait Evalable {
-    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult;
-    fn eval(&self, state: &CompileState) -> Value {
+    fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult;
+    fn eval(&self, state: &mut CompileState) -> Value {
         let mut instrs = Instrs::new();
         match self.compile(state, &mut instrs) {
             Ok(()) => {
@@ -383,7 +386,7 @@ pub trait Evalable {
                 if let Err(e) = stack.execute(&instrs) {
                     return e.into();
                 }
-                stack.pop()
+                stack.pop().unwrap_or_else(Into::into)
             }
             Err(e) => e.into(),
         }
@@ -391,7 +394,7 @@ pub trait Evalable {
 }
 
 impl Evalable for ExprOr {
-    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
         self.left.data.compile(state, instrs)?;
         for right in &self.rights {
             let mut delayed = Instrs::new();
@@ -404,7 +407,7 @@ impl Evalable for ExprOr {
 }
 
 impl Evalable for ExprAnd {
-    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
         self.left.data.compile(state, instrs)?;
         for right in &self.rights {
             let mut delayed = Instrs::new();
@@ -417,7 +420,7 @@ impl Evalable for ExprAnd {
 }
 
 impl Evalable for ExprCmp {
-    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
         self.left.data.compile(state, instrs)?;
         for right in &self.rights {
             right.expr.data.compile(state, instrs)?;
@@ -428,7 +431,7 @@ impl Evalable for ExprCmp {
 }
 
 impl Evalable for ExprAS {
-    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
         self.left.data.compile(state, instrs)?;
         for right in &self.rights {
             right.expr.data.compile(state, instrs)?;
@@ -439,7 +442,7 @@ impl Evalable for ExprAS {
 }
 
 impl Evalable for ExprMDR {
-    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
         self.left.data.compile(state, instrs)?;
         for right in &self.rights {
             right.expr.data.compile(state, instrs)?;
@@ -450,7 +453,7 @@ impl Evalable for ExprMDR {
 }
 
 impl Evalable for ExprCall {
-    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
         match self {
             ExprCall::Regular { term, args } => {
                 let mut arg_count = None;
@@ -481,7 +484,7 @@ impl Evalable for ExprCall {
 }
 
 impl Evalable for ExprNot {
-    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
         self.expr.compile(state, instrs)?;
         for _ in 0..self.count {
             instrs.push(Instr::Not);
@@ -491,7 +494,7 @@ impl Evalable for ExprNot {
 }
 
 impl Evalable for Term {
-    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
         match self {
             Term::Expr(expr) => expr.compile(state, instrs)?,
             Term::Bool(b) => instrs.push(Value::Bool(*b).into()),
@@ -513,15 +516,15 @@ impl Evalable for Term {
                 for (ident, val) in &function.env {
                     function_cb.as_mut().insert(ident.into(), val.clone())
                 }
-                // Create a new state for compiling the function
-                let mut function_state = CompileState::new(function_cb, state.callers.clone());
-                // Add the function's args to the new state's arg stack
-                function_state.args = function_state.args.push_back(function.args.clone());
+                // Push the function's args to the state's arg stack
+                state.args.push(function.args.clone());
                 // Compile the function
                 let mut function_instrs = function_instrs.lock().unwrap();
                 let function_instrs = function_instrs.get_or_insert_with(Vec::new);
                 function_instrs.clear();
-                body.compile(&function_state, function_instrs)?;
+                body.compile(state, function_instrs)?;
+                // Pop the function's args
+                state.args.pop();
                 // Add the function as a push instruction
                 instrs.push(Value::Function((*function).clone().into()).into());
             }

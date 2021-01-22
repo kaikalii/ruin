@@ -6,7 +6,7 @@ pub fn add_std_lib(cb: &mut Codebase) {
     cb.insert(
         "print".into(),
         Function::new_builtin(&["seq", "message"], |stack| {
-            let message = stack.pop();
+            let message = stack.pop()?;
             stack.pop_seq()?;
             colored::control::set_override(false);
             print!("{}", message);
@@ -19,7 +19,7 @@ pub fn add_std_lib(cb: &mut Codebase) {
     cb.insert(
         "println".into(),
         Function::new_builtin(&["seq", "message"], |stack| {
-            let message = stack.pop();
+            let message = stack.pop()?;
             stack.pop_seq()?;
             colored::control::set_override(false);
             println!("{}", message);
