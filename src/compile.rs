@@ -54,8 +54,8 @@ pub type ArgValStack = Vec<Vec<Value>>;
 pub type ArgIndex = (usize, usize);
 
 fn stack_arg(arg_stack: &[Vec<String>], ident: &str) -> EvalResult<ArgIndex> {
-    for (i, args) in arg_stack.iter().enumerate() {
-        for (j, arg) in args.iter().enumerate() {
+    for (i, args) in arg_stack.iter().enumerate().rev() {
+        for (j, arg) in args.iter().enumerate().rev() {
             if ident == arg {
                 return Ok((i, j));
             }
@@ -518,10 +518,11 @@ impl Evalable for Term {
                 }
                 // Push the function's args to the state's arg stack
                 state.args.push(function.args.clone());
-                // Compile the function
+                // Access the function's instructions
                 let mut function_instrs = function_instrs.lock().unwrap();
                 let function_instrs = function_instrs.get_or_insert_with(Vec::new);
                 function_instrs.clear();
+                // Compile the function body
                 body.compile(state, function_instrs)?;
                 // Pop the function's args
                 state.args.pop();
