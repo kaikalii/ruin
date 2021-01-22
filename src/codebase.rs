@@ -3,12 +3,12 @@ use std::{ops::Index, sync::Arc};
 use colored::Colorize;
 use indexmap::IndexMap;
 
-use crate::{eval::*, parse::*, value::*};
+use crate::{compile::*, value::*};
 
 #[derive(Debug, Clone, Default)]
 pub struct Codebase {
     pub parent: Option<Arc<Self>>,
-    pub vals: IndexMap<Path, Value>,
+    pub vals: IndexMap<String, Value>,
 }
 
 impl Codebase {
@@ -24,28 +24,28 @@ impl Codebase {
         }
         .into()
     }
-    pub fn get(&self, path: &Path) -> Option<&Value> {
+    pub fn get(&self, ident: &str) -> Option<&Value> {
         self.vals
-            .get(path)
-            .or_else(|| self.parent.as_ref().and_then(|parent| parent.get(path)))
+            .get(ident)
+            .or_else(|| self.parent.as_ref().and_then(|parent| parent.get(ident)))
     }
-    pub fn insert<V>(&mut self, path: Path, val: V)
+    pub fn insert<V>(&mut self, ident: String, val: V)
     where
         V: Into<Value>,
     {
-        // Unassign results that depend on the path
-        self.unassign_results(&path);
+        // Unassign results that depend on the ident
+        self.unassign_results(&ident);
         // Insert
-        self.vals.remove(&path);
-        self.vals.insert(path, val.into());
+        self.vals.remove(&ident);
+        self.vals.insert(ident, val.into());
     }
     pub fn print(&self, n: usize) {
         println!();
         if n < self.vals.len() {
             println!("...");
         }
-        for (path, val) in self.vals.iter().rev().take(n).rev() {
-            println!("{} = {}", path.to_string().bold(), val)
+        for (ident, val) in self.vals.iter().rev().take(n).rev() {
+            println!("{} = {}", ident.to_string().bold(), val)
         }
         println!();
     }
@@ -55,16 +55,15 @@ impl Codebase {
             .filter(|val| !val.is_err() && val.is_evald())
             .count()
     }
-    pub fn unassign_results(&mut self, path: &Path) {
-        let mut paths = vec![path.to_owned()];
-        while !paths.is_empty() {
-            for child in paths.drain(..).collect::<Vec<_>>() {
+    pub fn unassign_results(&mut self, ident: &str) {
+        let mut idents = vec![ident.to_owned()];
+        while !idents.is_empty() {
+            for child in idents.drain(..).collect::<Vec<_>>() {
                 for (id, val) in &mut self.vals {
-                    let ident = path.name.as_ref().unwrap();
                     if val.contains_ident(ident) {
                         val.reset();
-                        if &child != path {
-                            paths.push(id.clone());
+                        if child != ident {
+                            idents.push(id.clone());
                         }
                     }
                 }
@@ -72,13 +71,13 @@ impl Codebase {
         }
     }
     pub fn eval_all(self: &mut Arc<Self>) {
-        // Get initial count and paths
+        // Get initial count and idents
         let mut count = self.evaled_count();
-        let paths: Vec<_> = self.vals.keys().cloned().collect();
+        let idents: Vec<_> = self.vals.keys().cloned().collect();
         // Loop until the number of success counts does not change
         loop {
-            for path in &paths {
-                self.eval_path(path);
+            for ident in &idents {
+                self.eval_ident(ident);
             }
             let new_count = self.evaled_count();
             if new_count == count {
@@ -87,37 +86,11 @@ impl Codebase {
             count = new_count;
         }
     }
-    fn eval_path(self: &mut Arc<Self>, path: &Path) {
-        let evald = eval_path(self, path);
-        if let Some(val) = self.as_mut().vals.get_mut(path) {
+    fn eval_ident(self: &mut Arc<Self>, ident: &str) {
+        let evald = eval_ident(self, ident);
+        if let Some(val) = self.as_mut().vals.get_mut(ident) {
             if let Value::Expression { val, .. } = val {
                 *val = Some(evald.into());
-            }
-        }
-        if !path.disam.is_empty() {
-            if let Some(parent) = path.parent() {
-                self.eval_path(&parent);
-                if let Some(child_val) = self.vals.get(path).cloned() {
-                    if let Some(parent_val) = self.as_mut().vals.get_mut(&parent) {
-                        match parent_val.as_evald_mut() {
-                            Value::Function(function) => {
-                                let function = Arc::make_mut(function);
-                                function.env =
-                                    function.env.insert(path.name.clone().unwrap(), child_val);
-                            }
-                            Value::Table(table) => {
-                                *table = table
-                                    .insert(Key::String(path.name.clone().unwrap()), child_val);
-                            }
-                            parent_val => {
-                                let ty = parent_val.ty();
-                                let expr = parent_val.to_string();
-                                *self.as_mut().vals.get_mut(path).unwrap() =
-                                    Err(EvalError::CantAssign { expr, ty }).into();
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -125,13 +98,13 @@ impl Codebase {
 
 impl<P> Index<P> for Codebase
 where
-    P: Into<Path>,
+    P: Into<String>,
 {
     type Output = Value;
-    fn index(&self, path: P) -> &Self::Output {
-        let path = path.into();
+    fn index(&self, ident: P) -> &Self::Output {
+        let ident = ident.into();
         self.vals
-            .get(&path)
-            .unwrap_or_else(|| panic!("Unknown val: {}", path))
+            .get(&ident)
+            .unwrap_or_else(|| panic!("Unknown val: {}", ident))
     }
 }

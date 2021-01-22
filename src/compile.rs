@@ -1,4 +1,4 @@
-use std::{iter::repeat, ops::Index, sync::Arc};
+use std::{ops::Index, sync::Arc};
 
 use derive_more::Display;
 use rpds::VectorSync;
@@ -10,50 +10,80 @@ pub enum EvalError {
     #[display(fmt = "Attempted to perform arithmetic on {} value", _0)]
     Math(Type),
     #[display(fmt = "Recursive value detected: {}", _0)]
-    RecursiveValue(Path),
+    RecursiveValue(String),
     #[display(fmt = "Attempted to call {}, a {} value", expr, ty)]
-    CallNonFunction { expr: String, ty: Type },
+    CallNonFunction {
+        expr: String,
+        ty: Type,
+    },
     #[display(fmt = "Cannot assign member of {}, a {} value", expr, ty)]
-    CantAssign { expr: String, ty: Type },
+    _CantAssign {
+        expr: String,
+        ty: Type,
+    },
     #[display(fmt = "Expected {} but found {}", expected, found)]
-    TypeMismatch { expected: Type, found: Type },
+    TypeMismatch {
+        expected: Type,
+        found: Type,
+    },
+    #[display(fmt = "Unknown value: {:?}", _0)]
+    UnknownValue(String),
+    Value(String),
 }
 
 pub type EvalResult<T = ()> = Result<T, EvalError>;
 
-pub type Callers = VectorSync<Path>;
+pub type Callers = VectorSync<String>;
+
+pub type ArgNameStack = VectorSync<Vec<String>>;
+pub type ArgValStack = Vec<Vec<Value>>;
+
+pub type ArgIndex = (usize, usize);
+
+fn stack_arg(arg_stack: &ArgNameStack, ident: &str) -> EvalResult<ArgIndex> {
+    for (i, args) in arg_stack.iter().enumerate() {
+        for (j, arg) in args.iter().enumerate() {
+            if ident == arg {
+                return Ok((i, j));
+            }
+        }
+    }
+    Err(EvalError::UnknownValue(ident.into()))
+}
 
 #[derive(Clone)]
 pub struct EvalState {
     pub cb: Arc<Codebase>,
     pub callers: Callers,
+    pub args: ArgNameStack,
 }
 
 impl EvalState {
     pub fn new(cb: Arc<Codebase>, callers: Callers) -> Self {
-        EvalState { cb, callers }
+        EvalState {
+            cb,
+            callers,
+            args: ArgNameStack::default(),
+        }
     }
 }
 
 impl<P> Index<P> for EvalState
 where
-    P: Into<Path>,
+    P: Into<String>,
 {
     type Output = Value;
-    fn index(&self, path: P) -> &Self::Output {
-        &self.cb[path]
+    fn index(&self, ident: P) -> &Self::Output {
+        &self.cb[ident]
     }
 }
 
-pub fn eval_path(cb: &Arc<Codebase>, path: &Path) -> Value {
+pub fn eval_ident(cb: &Arc<Codebase>, ident: &str) -> Value {
     let mut instrs = Instrs::new();
-    let res = eval_rec(
-        path,
-        EvalState::new(cb.clone(), Callers::default().push_back(path.clone())),
-        &mut instrs,
-    );
+    let state = EvalState::new(cb.clone(), Default::default());
+    let res = compile_ident(ident, &state, &mut instrs);
     if let Err(e) = res {
-        return Err(e).into();
+        return e.into();
     }
     Stack::default().run(&instrs)
 }
@@ -86,6 +116,7 @@ impl Pushed {
 pub enum Instr {
     Push(Value),
     Delayed(Instrs),
+    Arg(ArgIndex),
     Or,
     And,
     Cmp(OpCmp),
@@ -93,7 +124,6 @@ pub enum Instr {
     MDR(OpMDR),
     Not,
     Call(usize),
-    Builtin(BuiltinFunction),
 }
 
 impl From<Value> for Instr {
@@ -111,23 +141,36 @@ impl From<Instrs> for Instr {
 pub type Instrs = Vec<Instr>;
 
 #[derive(Default)]
-pub struct Stack(Vec<Pushed>);
+pub struct Stack {
+    vals: Vec<Pushed>,
+    args: ArgValStack,
+}
 
 impl Stack {
+    #[track_caller]
     pub fn pop(&mut self) -> Value {
-        self.0.pop().expect("Stack is empty").unwrap_value()
+        self.vals.pop().expect("Stack is empty").unwrap_value()
     }
+    #[track_caller]
     pub fn pop2(&mut self) -> (Value, Value) {
         (self.pop(), self.pop())
     }
+    #[track_caller]
     pub fn pop_delayed(&mut self) -> Instrs {
-        self.0.pop().expect("Stack is empty").unwrap_delayed()
+        self.vals.pop().expect("Stack is empty").unwrap_delayed()
     }
     pub fn push(&mut self, val: Value) {
-        self.0.push(Pushed::Value(val));
+        self.vals.push(Pushed::Value(val));
     }
     pub fn push_delayed(&mut self, instrs: Instrs) {
-        self.0.push(Pushed::Delayed(instrs));
+        self.vals.push(Pushed::Delayed(instrs));
+    }
+    pub fn arg(&self, (i, j): ArgIndex) -> Value {
+        self.args
+            .get(i)
+            .and_then(|args| args.get(j))
+            .cloned()
+            .unwrap_or(Value::Nil)
     }
     pub fn execute(&mut self, instrs: &[Instr]) -> EvalResult {
         for instr in instrs {
@@ -137,7 +180,7 @@ impl Stack {
     }
     pub fn run(&mut self, instrs: &[Instr]) -> Value {
         if let Err(e) = self.execute(instrs) {
-            return Err(e).into();
+            return e.into();
         }
         self.pop()
     }
@@ -148,6 +191,7 @@ impl Instr {
         match self {
             Instr::Push(val) => stack.push(val.clone()),
             Instr::Delayed(instrs) => stack.push_delayed(instrs.clone()),
+            Instr::Arg(index) => stack.push(stack.arg(*index)),
             Instr::Or => {
                 let left = stack.pop();
                 let right = stack.pop_delayed();
@@ -214,60 +258,93 @@ impl Instr {
                 let val = stack.pop();
                 stack.push(Value::Bool(!val.is_truth()));
             }
-            Instr::Builtin(f) => f(stack)?,
             Instr::Call(arg_count) => {
                 let fval = stack.pop();
-                let mut args = Vec::with_capacity(*arg_count);
-                for _ in 0..*arg_count {
-                    args.push(stack.pop());
+                let function = match fval {
+                    Value::Function(function) => function,
+                    Value::Error(e) => return Err(EvalError::Value(e)),
+                    val => {
+                        return Err(EvalError::CallNonFunction {
+                            expr: val.to_string(),
+                            ty: val.ty(),
+                        })
+                    }
+                };
+                match &function.body {
+                    FunctionBody::Builtin(f) => f(stack)?,
+                    FunctionBody::Expr { instrs, .. } => {
+                        let mut args = Vec::with_capacity(*arg_count);
+                        for _ in 0..*arg_count {
+                            args.push(stack.pop());
+                        }
+                        args.reverse();
+                        stack.args.push(args);
+                        stack.execute(instrs.lock().unwrap().as_ref().unwrap())?;
+                        stack.args.pop();
+                    }
                 }
-                args.reverse();
-                let mut finstrs = Instrs::new();
-                compile_function(&fval, &fval, args, state, &mut finstrs)?;
             }
         }
         Ok(())
     }
 }
 
-fn eval_rec(path: &Path, state: EvalState, instrs: &mut Instrs) -> EvalResult {
-    if let Some(val) = state.cb.get(path).cloned() {
-        if let Value::Expression { val, expr } = val {
-            if let Some(val) = val {
-                instrs.push((*val).into());
+fn compile_ident(ident: &str, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+    match stack_arg(&state.args, ident) {
+        Ok(index) => {
+            instrs.push(Instr::Arg(index));
+            return Ok(());
+        }
+        Err(e) => {
+            if state.callers.iter().any(|name| name == ident) {
+                return Err(EvalError::RecursiveValue(ident.into()));
+            } else if let Some(val) = state.cb.get(ident).cloned() {
+                if let Value::Expression { val, expr } = val {
+                    if let Some(val) = val {
+                        instrs.push((*val).into());
+                    } else {
+                        instrs.push(
+                            expr.eval(&EvalState::new(
+                                state.cb.clone(),
+                                state.callers.push_back(ident.into()),
+                            ))
+                            .into(),
+                        );
+                    }
+                } else {
+                    instrs.push(val.into());
+                }
             } else {
-                instrs.push(expr.eval(state).into());
+                return Err(e);
             }
-        } else {
-            instrs.push(val.into());
         }
     }
     Ok(())
 }
 
 pub trait Evalable {
-    fn compile(&self, state: EvalState, instrs: &mut Instrs) -> EvalResult;
-    fn eval(&self, state: EvalState) -> Value {
+    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult;
+    fn eval(&self, state: &EvalState) -> Value {
         let mut instrs = Instrs::new();
         match self.compile(state, &mut instrs) {
             Ok(()) => {
                 let mut stack = Stack::default();
                 if let Err(e) = stack.execute(&instrs) {
-                    return Err(e).into();
+                    return e.into();
                 }
                 stack.pop()
             }
-            Err(e) => Err(e).into(),
+            Err(e) => e.into(),
         }
     }
 }
 
 impl Evalable for ExprOr {
-    fn compile(&self, state: EvalState, instrs: &mut Instrs) -> EvalResult {
-        self.left.data.compile(state.clone(), instrs)?;
+    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+        self.left.data.compile(state, instrs)?;
         for right in &self.rights {
             let mut delayed = Instrs::new();
-            right.expr.data.compile(state.clone(), &mut delayed)?;
+            right.expr.data.compile(state, &mut delayed)?;
             instrs.push(delayed.into());
             instrs.push(Instr::Or);
         }
@@ -276,11 +353,11 @@ impl Evalable for ExprOr {
 }
 
 impl Evalable for ExprAnd {
-    fn compile(&self, state: EvalState, instrs: &mut Instrs) -> EvalResult {
-        self.left.data.compile(state.clone(), instrs)?;
+    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+        self.left.data.compile(state, instrs)?;
         for right in &self.rights {
             let mut delayed = Instrs::new();
-            right.expr.data.compile(state.clone(), &mut delayed)?;
+            right.expr.data.compile(state, &mut delayed)?;
             instrs.push(delayed.into());
             instrs.push(Instr::And);
         }
@@ -289,10 +366,10 @@ impl Evalable for ExprAnd {
 }
 
 impl Evalable for ExprCmp {
-    fn compile(&self, state: EvalState, instrs: &mut Instrs) -> EvalResult {
-        self.left.data.compile(state.clone(), instrs)?;
+    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+        self.left.data.compile(state, instrs)?;
         for right in &self.rights {
-            right.expr.data.compile(state.clone(), instrs)?;
+            right.expr.data.compile(state, instrs)?;
             instrs.push(Instr::Cmp(right.op.data));
         }
         Ok(())
@@ -300,10 +377,10 @@ impl Evalable for ExprCmp {
 }
 
 impl Evalable for ExprAS {
-    fn compile(&self, state: EvalState, instrs: &mut Instrs) -> EvalResult {
-        self.left.data.compile(state.clone(), instrs)?;
+    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+        self.left.data.compile(state, instrs)?;
         for right in &self.rights {
-            right.expr.data.compile(state.clone(), instrs)?;
+            right.expr.data.compile(state, instrs)?;
             instrs.push(Instr::AS(right.op.data));
         }
         Ok(())
@@ -311,10 +388,10 @@ impl Evalable for ExprAS {
 }
 
 impl Evalable for ExprMDR {
-    fn compile(&self, state: EvalState, instrs: &mut Instrs) -> EvalResult {
-        self.left.data.compile(state.clone(), instrs)?;
+    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+        self.left.data.compile(state, instrs)?;
         for right in &self.rights {
-            right.expr.data.compile(state.clone(), instrs)?;
+            right.expr.data.compile(state, instrs)?;
             instrs.push(Instr::MDR(right.op.data));
         }
         Ok(())
@@ -322,28 +399,28 @@ impl Evalable for ExprMDR {
 }
 
 impl Evalable for ExprCall {
-    fn compile(&self, state: EvalState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
         match self {
             ExprCall::Regular { term, args } => {
                 let mut arg_count = None;
                 if let Some(args) = args {
                     for arg in args {
-                        arg.compile(state.clone(), instrs)?;
+                        arg.compile(state, instrs)?;
                     }
                     arg_count = Some(args.len());
                 }
+                term.compile(state, instrs)?;
                 if let Some(arg_count) = arg_count {
                     instrs.push(Instr::Call(arg_count));
                 }
-                term.compile(state, instrs)?;
             }
             ExprCall::Method { first, calls } => {
-                first.compile(state.clone(), instrs)?;
+                first.compile(state, instrs)?;
                 for call in calls {
                     for arg in &call.args {
-                        arg.compile(state.clone(), instrs)?;
+                        arg.compile(state, instrs)?;
                     }
-                    call.term.compile(state.clone(), instrs)?;
+                    call.term.compile(state, instrs)?;
                     instrs.push(Instr::Call(call.args.len() + 1));
                 }
             }
@@ -352,43 +429,8 @@ impl Evalable for ExprCall {
     }
 }
 
-pub fn compile_function<T>(
-    context: &T,
-    fexpr: &Value,
-    args: Vec<Value>,
-    state: EvalState,
-    instrs: &mut Instrs,
-) -> EvalResult
-where
-    T: std::fmt::Display,
-{
-    let function = if let Value::Function(f) = fexpr.as_evald() {
-        f.clone()
-    } else {
-        return Err(EvalError::CallNonFunction {
-            expr: context.to_string(),
-            ty: fexpr.ty(),
-        });
-    };
-
-    let mut function_cb = Codebase::from_parent(state.cb.clone());
-    for (name, val) in function
-        .args
-        .iter()
-        .zip(args.into_iter().chain(repeat(Value::Nil)))
-    {
-        function_cb.as_mut().insert(name.into(), val);
-    }
-    for (ident, expr) in &function.env {
-        function_cb.as_mut().insert(ident.into(), expr.clone())
-    }
-    function
-        .body
-        .compile(EvalState::new(function_cb, state.callers), instrs)
-}
-
 impl Evalable for ExprNot {
-    fn compile(&self, state: EvalState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
         self.expr.compile(state, instrs)?;
         for _ in 0..self.count {
             instrs.push(Instr::Not);
@@ -398,41 +440,33 @@ impl Evalable for ExprNot {
 }
 
 impl Evalable for Term {
-    fn compile(&self, state: EvalState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
         match self {
             Term::Expr(expr) => expr.compile(state, instrs)?,
             Term::Bool(b) => instrs.push(Value::Bool(*b).into()),
             Term::Num(n) => instrs.push(Value::Num(*n).into()),
             Term::Nil => instrs.push(Value::Nil.into()),
-            Term::Ident(ident) => {
-                if state
-                    .callers
-                    .iter()
-                    .filter_map(|path| path.name.as_ref())
-                    .any(|name| name == ident)
-                {
-                    return Err(EvalError::RecursiveValue(ident.into()));
-                } else {
-                    let path = Path::from(ident);
-                    let sub_callers = state.callers.push_back(path.clone());
-                    eval_rec(&path, EvalState::new(state.cb, sub_callers), instrs)?;
-                }
-            }
+            Term::Ident(ident) => compile_ident(ident, state, instrs)?,
             Term::String(s) => instrs.push(Value::String(s.clone()).into()),
-            Term::Function(f) => instrs.push(Value::Function(f.clone().into()).into()),
-        }
-        Ok(())
-    }
-}
-
-impl FunctionBody {
-    fn compile(&self, state: EvalState, instrs: &mut Instrs) -> EvalResult {
-        match self {
-            FunctionBody::Expr {
-                expr,
-                instrs: finstrs,
-            } => expr.compile(state, instrs)?,
-            FunctionBody::Builtin(f) => instrs.push(Instr::Builtin(f.clone())),
+            Term::Function(function) => {
+                let (body, function_instrs) =
+                    if let FunctionBody::Expr { expr, instrs } = &function.body {
+                        (expr, instrs)
+                    } else {
+                        panic!("Built-in function in term")
+                    };
+                let mut function_cb = Codebase::from_parent(state.cb.clone());
+                for (ident, val) in &function.env {
+                    function_cb.as_mut().insert(ident.into(), val.clone())
+                }
+                let mut function_state = EvalState::new(function_cb, state.callers.clone());
+                function_state.args = function_state.args.push_back(function.args.clone());
+                let mut function_instrs = function_instrs.lock().unwrap();
+                let function_instrs = function_instrs.get_or_insert_with(Vec::new);
+                function_instrs.clear();
+                body.compile(&function_state, function_instrs)?;
+                instrs.push(Value::Function((*function).clone().into()).into());
+            }
         }
         Ok(())
     }

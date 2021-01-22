@@ -1,5 +1,5 @@
 mod codebase;
-mod eval;
+mod compile;
 mod lexer;
 mod num;
 mod parse;
@@ -17,8 +17,8 @@ use clap::Clap;
 use colored::Colorize;
 
 use codebase::Codebase;
-use eval::*;
-use parse::{parse, Command, Path};
+use compile::*;
+use parse::{parse, Command};
 
 fn main() {
     color_backtrace::install();
@@ -41,7 +41,7 @@ fn handle_input(input: &str, cb: &mut Arc<Codebase>, eval: bool) {
     match parse(input.as_bytes()) {
         Ok(command) => match command {
             Command::Assignment(ass) => {
-                cb.as_mut().insert(ass.path, ass.expr);
+                cb.as_mut().insert(ass.ident, ass.expr);
                 if eval {
                     cb.eval_all();
                     cb.print(10);
@@ -65,7 +65,7 @@ fn handle_input(input: &str, cb: &mut Arc<Codebase>, eval: bool) {
             }
             Command::Eval(expr) => {
                 println!();
-                let val = expr.eval(EvalState::new(cb.clone(), once(Path::GLOBAL).collect()));
+                let val = expr.eval(&EvalState::new(cb.clone(), Default::default()));
                 println!("{}", val);
                 println!();
             }
@@ -81,13 +81,13 @@ fn print_prompt() {
 
 #[derive(Clap)]
 enum App {
-    Load { path: Option<Path> },
-    Run { path: Option<Path> },
+    Load { path: Option<String> },
+    Run { path: Option<String> },
 }
 
-fn load(cb: &mut Arc<Codebase>, path: Option<Path>, eval: bool) -> io::Result<()> {
+fn load(cb: &mut Arc<Codebase>, path: Option<String>, eval: bool) -> io::Result<()> {
     let path = path.unwrap_or_else(|| "main".into());
-    let text = fs::read_to_string(path.as_path_buf())?;
+    let text = fs::read_to_string(path)?;
     for line in text.lines() {
         handle_input(line, cb, false);
     }
@@ -98,13 +98,10 @@ fn load(cb: &mut Arc<Codebase>, path: Option<Path>, eval: bool) -> io::Result<()
     Ok(())
 }
 
-fn run(cb: &mut Arc<Codebase>, path: Option<Path>) {
+fn run(cb: &mut Arc<Codebase>, path: Option<String>) {
     let path = path.unwrap_or_else(|| "main".into());
     println!();
-    if let Some(_val) = cb.get(&path) {
-        todo!()
-    } else {
-        println!("Unknown function: {}", path)
-    }
+    let val = eval_ident(cb, &path);
+    println!("{}", val);
     println!();
 }

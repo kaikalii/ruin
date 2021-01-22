@@ -1,6 +1,6 @@
 use std::io::{stdout, Write};
 
-use crate::{codebase::*, value::*};
+use crate::{codebase::*, compile::*, value::*};
 
 pub fn add_std_lib(cb: &mut Codebase) {
     cb.insert(
@@ -30,6 +30,6 @@ pub fn add_std_lib(cb: &mut Codebase) {
     );
     cb.insert(
         "let".into(),
-        Function::new_builtin(&["val", "function"], |_| todo!()),
+        Function::new_builtin(&["val", "function"], |stack| Instr::Call(1).execute(stack)),
     );
 }

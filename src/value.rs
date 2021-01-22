@@ -2,7 +2,7 @@
 
 use std::{
     fmt::{self, Debug, Formatter},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use colored::Colorize;
@@ -10,7 +10,7 @@ use derive_more::Display;
 use itertools::Itertools;
 use rpds::{RedBlackTreeMapSync, VectorSync};
 
-use crate::{eval::*, num::Num, parse::*};
+use crate::{compile::*, num::Num, parse::*};
 
 pub type List = VectorSync<Value>;
 pub type Table = RedBlackTreeMapSync<Key, Value>;
@@ -122,9 +122,12 @@ impl From<Function> for Value {
     }
 }
 
-impl From<Result<Value, EvalError>> for Value {
-    fn from(res: Result<Value, EvalError>) -> Self {
-        res.map_err(|e| e.to_string()).unwrap_or_else(Value::Error)
+impl From<EvalError> for Value {
+    fn from(e: EvalError) -> Self {
+        match e {
+            EvalError::Value(e) => Value::Error(e),
+            e => Value::Error(e.to_string()),
+        }
     }
 }
 
@@ -133,6 +136,8 @@ pub enum Key {
     Num(Num),
     String(String),
 }
+
+pub type FunctionEnv = RedBlackTreeMapSync<String, Value>;
 
 #[derive(Debug, Display, Clone, PartialEq, Eq)]
 #[display(fmt = "{}", "self.format()")]
@@ -190,7 +195,7 @@ pub enum FunctionBody {
     #[display(fmt = "{}", expr)]
     Expr {
         expr: Expression,
-        instrs: Option<Instrs>,
+        instrs: Arc<Mutex<Option<Instrs>>>,
     },
     #[display(fmt = "built-in")]
     Builtin(BuiltinFunction),
@@ -207,7 +212,10 @@ impl Debug for FunctionBody {
 
 impl From<Expression> for FunctionBody {
     fn from(expr: Expression) -> Self {
-        FunctionBody::Expr { expr, instrs: None }
+        FunctionBody::Expr {
+            expr,
+            instrs: Arc::new(Mutex::new(None)),
+        }
     }
 }
 

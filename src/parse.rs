@@ -1,4 +1,4 @@
-use std::{fmt::Display as StdDisplay, io::Read, path::PathBuf, str::FromStr};
+use std::{fmt::Display as StdDisplay, io::Read};
 
 use colored::Colorize;
 use derive_more::Display;
@@ -220,24 +220,6 @@ impl Tokens {
             }
         }))
     }
-    pub fn path(&mut self) -> MaybeParse<Path> {
-        let mut idents = Vec::new();
-        let mut start = None;
-        let mut end = None;
-        while let Some(ident) = self.ident()? {
-            start.get_or_insert(ident.span.start);
-            end = Some(ident.span.end);
-            idents.push(ident.data);
-            if !self.matches(Token::Period) {
-                break;
-            }
-        }
-        Ok(if let Some(name) = idents.pop() {
-            Some(start.unwrap().to(end.unwrap()).sp(Path::new(idents, name)))
-        } else {
-            None
-        })
-    }
     pub fn command(&mut self) -> Result<Command, ParseError> {
         if let Some(ass) = self.assigment()? {
             Ok(Command::Assignment(ass.data))
@@ -249,8 +231,8 @@ impl Tokens {
     }
     pub fn assigment(&mut self) -> MaybeParse<Assignment> {
         let tracker = self.track();
-        let path = if let Some(path) = self.path()? {
-            path
+        let ident = if let Some(ident) = self.ident()? {
+            ident
         } else {
             return Ok(None);
         };
@@ -259,7 +241,7 @@ impl Tokens {
             return Ok(None);
         }
         let expr = self.expression()?;
-        let ass = path.join(expr, |path, expr| Assignment { path, expr });
+        let ass = ident.join(expr, |ident, expr| Assignment { ident, expr });
         Ok(Some(ass))
     }
     pub fn expression(&mut self) -> Parse<Expression> {
@@ -491,9 +473,9 @@ impl Tokens {
 }
 
 #[derive(Debug, Display, Clone, PartialEq, Eq)]
-#[display(fmt = "{} = {}", "path.to_string().bright_white()", expr)]
+#[display(fmt = "{} = {}", "ident.bright_white()", expr)]
 pub struct Assignment {
-    pub path: Path,
+    pub ident: String,
     pub expr: Expression,
 }
 
@@ -731,79 +713,6 @@ impl Node for ExprCall {
 pub struct Call {
     pub term: Term,
     pub args: Vec<Expression>,
-}
-
-#[derive(Debug, Display, Clone, PartialEq, Eq, Hash)]
-#[display(
-    fmt = "{}{}",
-    r#"disam.iter().map(|s| format!("{}.", s)).collect::<String>()"#,
-    "name.as_deref().unwrap_or_default()"
-)]
-pub struct Path {
-    pub disam: Vec<String>,
-    pub name: Option<String>,
-}
-
-impl<S> From<S> for Path
-where
-    S: Into<String>,
-{
-    fn from(s: S) -> Self {
-        Path::new(Option::<String>::None, s)
-    }
-}
-
-#[allow(dead_code)]
-impl Path {
-    pub const GLOBAL: Self = Path {
-        disam: Vec::new(),
-        name: None,
-    };
-    pub fn new<D, N>(disam: D, name: N) -> Self
-    where
-        D: IntoIterator,
-        D::Item: Into<String>,
-        N: Into<String>,
-    {
-        Path {
-            disam: disam.into_iter().map(Into::into).collect(),
-            name: Some(name.into()),
-        }
-    }
-    pub fn join<P>(&self, other: P) -> Self
-    where
-        P: Into<Path>,
-    {
-        let mut base = self.clone();
-        let other = other.into();
-        base.disam.extend(base.name);
-        base.disam.extend(other.disam);
-        base.name = other.name;
-        base
-    }
-    pub fn as_path_buf(&self) -> PathBuf {
-        let mut path = PathBuf::new();
-        path.extend(&self.disam);
-        path.extend(&self.name);
-        path.with_extension("ruin")
-    }
-    pub fn parent(&self) -> Option<Self> {
-        let mut disam = self.disam.clone();
-        if let Some(name) = disam.pop() {
-            Some(Path::new(disam, name))
-        } else {
-            None
-        }
-    }
-}
-
-impl FromStr for Path {
-    type Err = ParseError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Tokens::new(s.as_bytes())?
-            .require(Tokens::path, "path")
-            .map(|path| path.data)
-    }
 }
 
 #[derive(Debug, Display, Clone, PartialEq, Eq)]
