@@ -1,13 +1,12 @@
 #![allow(dead_code)]
 
 use std::{
-    fmt::{self, Debug, Formatter},
+    fmt,
     sync::{Arc, Mutex},
 };
 
 use colored::Colorize;
 use derive_more::Display;
-use itertools::Itertools;
 use rpds::{RedBlackTreeMapSync, VectorSync};
 
 use crate::{ast::*, compile::*, num::Num};
@@ -136,10 +135,9 @@ pub enum Key {
 
 pub type FunctionEnv = RedBlackTreeMapSync<String, Value>;
 
-#[derive(Debug, Display, Clone, PartialEq, Eq)]
-#[display(fmt = "{}", "self.format()")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
-    pub args: Vec<String>,
+    pub args: Args,
     pub body: FunctionBody,
     pub env: RedBlackTreeMapSync<String, Value>,
     pub bar: bool,
@@ -148,7 +146,7 @@ pub struct Function {
 impl Function {
     pub fn contains_ident(&self, ident: &str) -> bool {
         if let FunctionBody::Expr { expr, .. } = &self.body {
-            expr.contains_ident(ident) && !self.args.iter().any(|i| i == ident)
+            expr.contains_ident(ident) && !self.args.idents.iter().any(|i| i == ident)
         } else {
             false
         }
@@ -159,26 +157,29 @@ impl Function {
         I::Item: AsRef<str>,
         F: Fn(&mut Stack) -> EvalResult + Send + Sync + 'static,
     {
+        let args = Args {
+            idents: args.into_iter().map(|s| s.as_ref().into()).collect(),
+        };
         Function {
-            args: args.into_iter().map(|s| s.as_ref().into()).collect(),
+            args,
             body: FunctionBody::Builtin(Arc::new(f)),
             env: RedBlackTreeMapSync::default(),
             bar: false,
         }
     }
-    fn format(&self) -> String {
-        format!(
+}
+
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
             "{}{}{} {}",
             if self.bar {
                 "|".normal().to_string()
             } else {
                 format!("{}{}", "fn".magenta(), '(')
             },
-            self.args
-                .iter()
-                .map(|s| s.as_str())
-                .intersperse(", ")
-                .collect::<String>(),
+            self.args,
             if self.bar { "|" } else { ")" },
             self.body
         )
@@ -198,20 +199,20 @@ pub enum FunctionBody {
     Builtin(BuiltinFunction),
 }
 
-impl Debug for FunctionBody {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            FunctionBody::Expr { expr, .. } => expr.fmt(f),
-            FunctionBody::Builtin(_) => write!(f, "built-in"),
-        }
-    }
-}
-
 impl From<Expression> for FunctionBody {
     fn from(expr: Expression) -> Self {
         FunctionBody::Expr {
             expr,
             instrs: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+impl fmt::Debug for FunctionBody {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            FunctionBody::Expr { expr, .. } => expr.fmt(f),
+            FunctionBody::Builtin(_) => write!(f, "built-in"),
         }
     }
 }

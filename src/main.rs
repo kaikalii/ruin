@@ -73,6 +73,13 @@ fn handle_input(input: &str, cb: &mut Arc<Codebase>, eval: bool) {
                 println!("{}", val);
                 println!();
             }
+            Command::FunctionDecl(decl) => {
+                cb.as_mut().insert_function_decl(decl);
+                if eval {
+                    cb.eval_all();
+                    cb.print(10);
+                }
+            }
         },
         Err(e) => println!("Error: {}\n", e),
     }

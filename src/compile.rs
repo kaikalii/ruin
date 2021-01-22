@@ -136,7 +136,7 @@ impl Pushed {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Instr {
     Push(Value),
     Delayed(Instrs),
@@ -251,13 +251,14 @@ impl Stack {
 
 impl Instr {
     pub fn execute(&self, stack: &mut Stack) -> EvalResult {
+        println!("{:?}\n", self);
         match self {
             Instr::Push(val) => stack.push(val.clone()),
             Instr::Delayed(instrs) => stack.push_delayed(instrs.clone()),
             Instr::Arg(index) => stack.push(stack.arg(*index)),
             Instr::Or => {
-                let left = stack.pop()?;
                 let right = stack.pop_delayed()?;
+                let left = stack.pop()?;
                 if left.is_truth() {
                     stack.push(left);
                 } else {
@@ -265,8 +266,8 @@ impl Instr {
                 }
             }
             Instr::And => {
-                let left = stack.pop()?;
                 let right = stack.pop_delayed()?;
+                let left = stack.pop()?;
                 if left.is_truth() {
                     stack.execute(&right)?;
                 } else {
@@ -357,7 +358,15 @@ pub fn compile_ident(ident: &str, state: &mut CompileState, instrs: &mut Instrs)
         Ok(index) => instrs.push(Instr::Arg(index)),
         Err(e) => {
             if state.callers.iter().any(|name| name == ident) {
-                return Err(EvalError::RecursiveValue(ident.into()));
+                if state.cb.declared_functions.contains(ident) {
+                    let fval = state
+                        .cb
+                        .get(ident)
+                        .expect("Declared function not in codebase");
+                    instrs.push(fval.clone().into());
+                } else {
+                    return Err(EvalError::RecursiveValue(ident.into()));
+                }
             } else if let Some(val) = state.cb.get(ident).cloned() {
                 if let Value::Expression { val, expr } = val {
                     if let Some(val) = val {
@@ -505,34 +514,42 @@ impl Evalable for Term {
             Term::Nil => instrs.push(Value::Nil.into()),
             Term::Ident(ident) => compile_ident(ident, state, instrs)?,
             Term::String(s) => instrs.push(Value::String(s.clone()).into()),
-            Term::Function(function) => {
-                // Get the body and compiled instructions
-                let (body, function_instrs) =
-                    if let FunctionBody::Expr { expr, instrs } = &function.body {
-                        (expr, instrs)
-                    } else {
-                        panic!("Built-in function in term")
-                    };
-                // Create a codebase to be used for body compilation
-                let mut function_cb = Codebase::from_parent(state.cb.clone());
-                // Insert values from the function's environment into the new codebase
-                for (ident, val) in &function.env {
-                    function_cb.as_mut().insert(ident.into(), val.clone())
-                }
-                // Push the function's args to the state's arg stack
-                state.args.push(function.args.clone());
-                // Access the function's instructions
-                let mut function_instrs = function_instrs.lock().unwrap();
-                let function_instrs = function_instrs.get_or_insert_with(Vec::new);
-                function_instrs.clear();
-                // Compile the function body
-                body.compile(state, function_instrs)?;
-                // Pop the function's args
-                state.args.pop();
-                // Add the function as a push instruction
-                instrs.push(Value::Function((*function).clone().into()).into());
-            }
+            Term::Function(function) => compile_function(function, state, Some(instrs))?,
         }
         Ok(())
     }
+}
+
+pub fn compile_function(
+    function: &Function,
+    state: &mut CompileState,
+    instrs: Option<&mut Instrs>,
+) -> EvalResult {
+    // Get the body and compiled instructions
+    let (body, function_instrs) = if let FunctionBody::Expr { expr, instrs } = &function.body {
+        (expr, instrs)
+    } else {
+        panic!("Built-in function in term")
+    };
+    // Create a codebase to be used for body compilation
+    let mut function_cb = Codebase::from_parent(state.cb.clone());
+    // Insert values from the function's environment into the new codebase
+    for (ident, val) in &function.env {
+        function_cb.as_mut().insert(ident.into(), val.clone())
+    }
+    // Push the function's args to the state's arg stack
+    state.args.push(function.args.idents.clone());
+    // Access the function's instructions
+    let mut function_instrs = function_instrs.lock().unwrap();
+    let function_instrs = function_instrs.get_or_insert_with(Vec::new);
+    function_instrs.clear();
+    // Compile the function body
+    body.compile(state, function_instrs)?;
+    // Pop the function's args
+    state.args.pop();
+    // Add the function as a push instruction
+    if let Some(instrs) = instrs {
+        instrs.push(Value::Function((*function).clone().into()).into());
+    }
+    Ok(())
 }

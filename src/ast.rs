@@ -1,4 +1,4 @@
-use std::fmt::Display as StdDisplay;
+use std::fmt;
 
 use colored::Colorize;
 use derive_more::Display;
@@ -10,6 +10,7 @@ use crate::{num::Num, value::*};
 pub enum Command {
     Assignment(Assignment),
     Eval(Expression),
+    FunctionDecl(FunctionDecl),
     Command,
 }
 
@@ -21,15 +22,34 @@ pub struct Assignment {
 }
 
 #[derive(Debug, Display, Clone, PartialEq, Eq)]
-#[display(fmt = "{} = {}", "ident.bright_white()", expr)]
+#[display(
+    fmt = "{} {}({}) {}",
+    r#""fn".magenta()"#,
+    "ident.bright_white()",
+    "function.args",
+    "function.body"
+)]
 pub struct FunctionDecl {
     pub ident: String,
-    pub args: Vec<String>,
-    pub expr: Expression,
+    pub function: Function,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Args {
+    pub idents: Vec<String>,
+}
+
+impl fmt::Display for Args {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for s in self.idents.iter().map(AsRef::as_ref).intersperse(", ") {
+            write!(f, "{}", s)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Display, Clone, PartialEq, Eq)]
-#[display(bound = "O: StdDisplay, T: StdDisplay")]
+#[display(bound = "O: fmt::Display, T: fmt::Display")]
 #[display(
     fmt = "{}{}",
     "left",

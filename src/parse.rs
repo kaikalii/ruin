@@ -18,10 +18,17 @@ impl From<LexError> for ParseError {
     }
 }
 
-pub type Parse<T> = Result<T, ParseError>;
-pub type MaybeParse<T> = Result<Option<T>, ParseError>;
+pub type Parsed<T> = Result<T, ParseError>;
+pub type MaybeParsed<T> = Result<Option<T>, ParseError>;
 
-trait TokenPattern: StdDisplay {
+pub fn parse<R>(input: R) -> Result<Command, ParseError>
+where
+    R: Read,
+{
+    Command::parse(&mut Tokens::new(input)?)
+}
+
+pub trait TokenPattern: StdDisplay {
     fn matches(&self, token: &Token) -> bool;
 }
 
@@ -49,11 +56,10 @@ impl<'a> TokenPattern for &'a str {
     }
 }
 
-struct Tokens {
+pub struct Tokens {
     iter: std::vec::IntoIter<Token>,
     history: Vec<Token>,
     cursor: usize,
-    // revert_trackers: usize,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -68,7 +74,6 @@ impl Tokens {
             iter: lex(input)?.into_iter(),
             history: Vec::new(),
             cursor: 0,
-            // revert_trackers: 0,
         })
     }
     pub fn take(&mut self) -> Option<Token> {
@@ -120,11 +125,6 @@ impl Tokens {
     }
     pub fn revert(&mut self, handle: RevertHandle) {
         self.cursor = handle.0;
-        // self.revert_trackers -= 1;
-        // if self.revert_trackers == 0 {
-        //     self.cursor = 0;
-        //     self.history.clear();
-        // }
     }
     pub fn take_if<P>(&mut self, pattern: P) -> Option<Token>
     where
@@ -153,21 +153,25 @@ impl Tokens {
     {
         self.matches_as(pattern, ()).is_some()
     }
-    pub fn require_token<P>(&mut self, pattern: P) -> Parse<Token>
+    pub fn require_token<P>(&mut self, pattern: P) -> Parsed<Token>
     where
         P: TokenPattern,
     {
         self.take_if(&pattern)
             .ok_or_else(|| ParseError::Expected(pattern.to_string()))
     }
-    pub fn require<F, T>(&mut self, f: F, name: &str) -> Parse<T>
+    pub fn require<F, T>(&mut self, f: F, name: &str) -> Parsed<T>
     where
-        F: Fn(&mut Self) -> MaybeParse<T>,
+        F: Fn(&mut Self) -> MaybeParsed<T>,
     {
         f(self).and_then(|op| op.ok_or_else(|| ParseError::Expected(name.into())))
     }
-    pub fn ident(&mut self) -> MaybeParse<String> {
-        Ok(self.take_as(|token| {
+}
+
+impl Parse for String {
+    const EXPECTATION: &'static str = "identifier";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        Ok(tokens.take_as(|token| {
             if let Token::Ident(s) = token {
                 Some(s.clone())
             } else {
@@ -175,7 +179,264 @@ impl Tokens {
             }
         }))
     }
-    pub fn string_literal(&mut self) -> MaybeParse<String> {
+}
+
+impl Parse for Num {
+    const EXPECTATION: &'static str = "number";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        Ok(tokens.take_as(|token| {
+            if let Token::Num(num) = token {
+                Some(*num)
+            } else {
+                None
+            }
+        }))
+    }
+}
+
+impl Parse for bool {
+    const EXPECTATION: &'static str = "boolean";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        Ok(tokens.take_as(|token| {
+            if let Token::Bool(b) = token {
+                Some(*b)
+            } else {
+                None
+            }
+        }))
+    }
+}
+
+impl Parse for OpCmp {
+    const EXPECTATION: &'static str = "comparison";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        Ok(tokens.take_as(|token| {
+            if let Token::Cmp(cmp) = token {
+                Some(*cmp)
+            } else {
+                None
+            }
+        }))
+    }
+}
+
+impl Parse for Command {
+    const EXPECTATION: &'static str = "command";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        if let Some(decl) = FunctionDecl::try_parse(tokens)? {
+            Ok(Command::FunctionDecl(decl))
+        } else if let Some(ass) = Assignment::try_parse(tokens)? {
+            Ok(Command::Assignment(ass))
+        } else if tokens.matches(Token::Slash) {
+            Ok(Command::Command)
+        } else {
+            Expression::parse(tokens).map(Command::Eval)
+        }
+        .map(Some)
+    }
+}
+
+impl Parse for Assignment {
+    const EXPECTATION: &'static str = "assignment";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        let tracker = tokens.track();
+        let ident = if let Some(ident) = String::try_parse(tokens)? {
+            ident
+        } else {
+            return Ok(None);
+        };
+        if !tokens.matches(Token::Equals) {
+            tokens.revert(tracker);
+            return Ok(None);
+        }
+        let expr = Expression::parse(tokens)?;
+        Ok(Some(Assignment { ident, expr }))
+    }
+}
+
+impl Parse for FunctionDecl {
+    const EXPECTATION: &'static str = "function declaration";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        Ok(if tokens.matches(Token::Fn) {
+            let ident = String::parse(tokens)?;
+            tokens.require_token(Token::OpenParen)?;
+            let args = Args::parse(tokens)?;
+            tokens.require_token(Token::CloseParen)?;
+            let expr = Expression::parse(tokens)?;
+            Some(FunctionDecl {
+                ident,
+                function: Function {
+                    args,
+                    body: expr.into(),
+                    env: Default::default(),
+                    bar: false,
+                },
+            })
+        } else {
+            None
+        })
+    }
+}
+
+impl Parse for Args {
+    const EXPECTATION: &'static str = "arguments";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        let mut idents = Vec::new();
+        while let Some(ident) = String::try_parse(tokens)? {
+            idents.push(ident);
+            if !tokens.matches(Token::Comma) {
+                break;
+            }
+        }
+        Ok(Some(Args { idents }))
+    }
+}
+
+impl Parse for ExprOr {
+    const EXPECTATION: &'static str = "'or' expression";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        let left = ExprAnd::parse(tokens)?;
+        let mut rights = Vec::new();
+        while let Some(right) = tokens
+            .matches_as(Token::Or, OpOr)
+            .map(|op| ExprAnd::parse(tokens).map(|expr| Right::new(op, expr)))
+            .transpose()?
+        {
+            rights.push(right);
+        }
+        Ok(Some(ExprOr::new(left, rights)))
+    }
+}
+
+impl Parse for ExprAnd {
+    const EXPECTATION: &'static str = "'and' expression";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        let left = ExprCmp::parse(tokens)?;
+        let mut rights = Vec::new();
+        while let Some(right) = tokens
+            .matches_as(Token::And, OpAnd)
+            .map(|op| ExprCmp::parse(tokens).map(|expr| Right::new(op, expr)))
+            .transpose()?
+        {
+            rights.push(right);
+        }
+        Ok(Some(ExprAnd::new(left, rights)))
+    }
+}
+
+impl Parse for ExprCmp {
+    const EXPECTATION: &'static str = "comparison expression";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        let left = ExprAS::parse(tokens)?;
+        let mut rights = Vec::new();
+        while let Some(right) = OpCmp::try_parse(tokens)?
+            .map(|op| ExprAS::parse(tokens).map(|expr| Right::new(op, expr)))
+            .transpose()?
+        {
+            rights.push(right);
+        }
+        Ok(Some(ExprCmp::new(left, rights)))
+    }
+}
+
+impl Parse for ExprAS {
+    const EXPECTATION: &'static str = "add-substract expression";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        let left = ExprMDR::parse(tokens)?;
+        let mut rights = Vec::new();
+        while let Some(right) = tokens
+            .matches_as(Token::Plus, OpAS::Add)
+            .or_else(|| tokens.matches_as(Token::Hyphen, OpAS::Sub))
+            .map(|op| ExprMDR::parse(tokens).map(|expr| Right::new(op, expr)))
+            .transpose()?
+        {
+            rights.push(right);
+        }
+        Ok(Some(ExprAS::new(left, rights)))
+    }
+}
+
+impl Parse for ExprMDR {
+    const EXPECTATION: &'static str = "multiply-divide-remainder expression";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        let left = ExprNot::parse(tokens)?;
+        let mut rights = Vec::new();
+        while let Some(right) = tokens
+            .matches_as(Token::Asterisk, OpMDR::Mul)
+            .or_else(|| tokens.matches_as(Token::Slash, OpMDR::Div))
+            .or_else(|| tokens.matches_as(Token::PeArcent, OpMDR::Rem))
+            .map(|op| ExprNot::parse(tokens).map(|expr| Right::new(op, expr)))
+            .transpose()?
+        {
+            rights.push(right);
+        }
+        Ok(Some(ExprMDR::new(left, rights)))
+    }
+}
+
+impl Parse for ExprNot {
+    const EXPECTATION: &'static str = "'not' expression";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        let mut count = 0;
+        while tokens.matches(Token::Not) {
+            count += 1;
+        }
+        let expr = ExprCall::parse(tokens)?;
+        Ok(Some(ExprNot {
+            op: OpNot,
+            count,
+            expr,
+        }))
+    }
+}
+
+impl Parse for ExprCall {
+    const EXPECTATION: &'static str = "call expression";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        let first = Term::parse(tokens)?;
+        let mut method_call_syntax = false;
+        let mut calls = Vec::new();
+        while tokens.matches(Token::Colon) {
+            method_call_syntax = true;
+            let term = Term::parse(tokens)?;
+            let args = tokens.require(Tokens::arg_exprs, "arguments")?;
+            calls.push(Call { term, args });
+        }
+        if method_call_syntax {
+            return Ok(Some(ExprCall::Method { first, calls }));
+        }
+        let args = tokens.arg_exprs()?;
+        Ok(Some(ExprCall::Regular { term: first, args }))
+    }
+}
+
+impl Parse for Term {
+    const EXPECTATION: &'static str = "term";
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self> {
+        Ok(Some(if tokens.matches(Token::OpenParen) {
+            let expr = Expression::parse(tokens)?;
+            tokens.require_token(Token::CloseParen)?;
+            Term::Expr(expr.into())
+        } else if let Some(num) = Num::try_parse(tokens)? {
+            Term::Num(num)
+        } else if let Some(ident) = String::try_parse(tokens)? {
+            Term::Ident(ident)
+        } else if let Some(s) = tokens.string_literal()? {
+            Term::String(s)
+        } else if let Some(b) = bool::try_parse(tokens)? {
+            Term::Bool(b)
+        } else if let Some(function) = tokens.inline_function()? {
+            Term::Function(function.into())
+        } else if tokens.matches(Token::Nil) {
+            Term::Nil
+        } else {
+            return Ok(None);
+        }))
+    }
+}
+
+impl Tokens {
+    pub fn string_literal(&mut self) -> MaybeParsed<String> {
         Ok(self.take_as(|token| {
             if let Token::String(s) = token {
                 Some(s.clone())
@@ -184,166 +445,14 @@ impl Tokens {
             }
         }))
     }
-    pub fn num(&mut self) -> MaybeParse<Num> {
-        Ok(self.take_as(|token| {
-            if let Token::Num(num) = token {
-                Some(*num)
-            } else {
-                None
-            }
-        }))
-    }
-    pub fn boolean(&mut self) -> MaybeParse<bool> {
-        Ok(self.take_as(|token| {
-            if let Token::Bool(b) = token {
-                Some(*b)
-            } else {
-                None
-            }
-        }))
-    }
-    pub fn cmp(&mut self) -> MaybeParse<OpCmp> {
-        Ok(self.take_as(|token| {
-            if let Token::Cmp(cmp) = token {
-                Some(*cmp)
-            } else {
-                None
-            }
-        }))
-    }
-    pub fn command(&mut self) -> Result<Command, ParseError> {
-        if let Some(ass) = self.assigment()? {
-            Ok(Command::Assignment(ass))
-        } else if self.matches(Token::Slash) {
-            Ok(Command::Command)
-        } else {
-            self.expression().map(Command::Eval)
-        }
-    }
-    pub fn assigment(&mut self) -> MaybeParse<Assignment> {
-        let tracker = self.track();
-        let ident = if let Some(ident) = self.ident()? {
-            ident
-        } else {
-            return Ok(None);
-        };
-        if !self.matches(Token::Equals) {
-            self.revert(tracker);
-            return Ok(None);
-        }
-        let expr = self.expression()?;
-        Ok(Some(Assignment { ident, expr }))
-    }
-    pub fn expression(&mut self) -> Parse<Expression> {
-        self.expr_or()
-    }
-    pub fn expr_or(&mut self) -> Parse<ExprOr> {
-        let left = self.expr_and()?;
-        let mut rights = Vec::new();
-        while let Some(right) = self
-            .matches_as(Token::Or, OpOr)
-            .map(|op| self.expr_and().map(|expr| Right::new(op, expr)))
-            .transpose()?
-        {
-            rights.push(right);
-        }
-        Ok(ExprOr::new(left, rights))
-    }
-    pub fn expr_and(&mut self) -> Parse<ExprAnd> {
-        let left = self.expr_cmp()?;
-        let mut rights = Vec::new();
-        while let Some(right) = self
-            .matches_as(Token::And, OpAnd)
-            .map(|op| self.expr_cmp().map(|expr| Right::new(op, expr)))
-            .transpose()?
-        {
-            rights.push(right);
-        }
-        Ok(ExprAnd::new(left, rights))
-    }
-    pub fn expr_cmp(&mut self) -> Parse<ExprCmp> {
-        let left = self.expr_as()?;
-        let mut rights = Vec::new();
-        while let Some(right) = self
-            .cmp()?
-            .map(|op| self.expr_as().map(|expr| Right::new(op, expr)))
-            .transpose()?
-        {
-            rights.push(right);
-        }
-        Ok(ExprCmp::new(left, rights))
-    }
-    pub fn expr_as(&mut self) -> Parse<ExprAS> {
-        let left = self.expr_mdr()?;
-        let mut rights = Vec::new();
-        while let Some(right) = self
-            .matches_as(Token::Plus, OpAS::Add)
-            .or_else(|| self.matches_as(Token::Hyphen, OpAS::Sub))
-            .map(|op| self.expr_mdr().map(|expr| Right::new(op, expr)))
-            .transpose()?
-        {
-            rights.push(right);
-        }
-        Ok(ExprAS::new(left, rights))
-    }
-    pub fn expr_mdr(&mut self) -> Parse<ExprMDR> {
-        let left = self.expr_not()?;
-        let mut rights = Vec::new();
-        while let Some(right) = self
-            .matches_as(Token::Asterisk, OpMDR::Mul)
-            .or_else(|| self.matches_as(Token::Slash, OpMDR::Div))
-            .or_else(|| self.matches_as(Token::PeArcent, OpMDR::Rem))
-            .map(|op| self.expr_not().map(|expr| Right::new(op, expr)))
-            .transpose()?
-        {
-            rights.push(right);
-        }
-        Ok(ExprMDR::new(left, rights))
-    }
-    #[allow(dead_code)]
-    fn dbg(&self, line: u32) {
-        print!("{}: ", line);
-        for token in &self.history {
-            print!("{} ", token);
-        }
-        println!("{}", self.cursor);
-    }
-    pub fn expr_not(&mut self) -> Parse<ExprNot> {
-        let mut count = 0;
-        while self.matches(Token::Not) {
-            count += 1;
-        }
-        let expr = self.expr_call()?;
-        Ok(ExprNot {
-            op: OpNot,
-            count,
-            expr,
-        })
-    }
-    pub fn expr_call(&mut self) -> Parse<ExprCall> {
-        let first = self.term()?;
-        let mut method_call_syntax = false;
-        let mut calls = Vec::new();
-        while self.matches(Token::Colon) {
-            method_call_syntax = true;
-            let term = self.term()?;
-            let args = self.require(Self::args, "arguments")?;
-            calls.push(Call { term, args });
-        }
-        if method_call_syntax {
-            return Ok(ExprCall::Method { first, calls });
-        }
-        let args = self.args()?;
-        Ok(ExprCall::Regular { term: first, args })
-    }
-    pub fn args(&mut self) -> MaybeParse<Vec<Expression>> {
+    pub fn arg_exprs(&mut self) -> MaybeParsed<Vec<Expression>> {
         Ok(if self.matches(Token::OpenParen) {
             let mut args = Vec::new();
             loop {
                 if self.matches(Token::CloseParen) {
                     break;
                 }
-                let expr = self.expression()?;
+                let expr = Expression::parse(self)?;
                 args.push(expr);
                 if !self.matches(Token::Comma) {
                     break;
@@ -354,28 +463,7 @@ impl Tokens {
             None
         })
     }
-    pub fn term(&mut self) -> Parse<Term> {
-        Ok(if self.matches(Token::OpenParen) {
-            let expr = self.expression()?;
-            self.require_token(Token::CloseParen)?;
-            Term::Expr(expr.into())
-        } else if let Some(num) = self.num()? {
-            Term::Num(num)
-        } else if let Some(ident) = self.ident()? {
-            Term::Ident(ident)
-        } else if let Some(s) = self.string_literal()? {
-            Term::String(s)
-        } else if let Some(b) = self.boolean()? {
-            Term::Bool(b)
-        } else if let Some(function) = self.inline_function()? {
-            Term::Function(function.into())
-        } else if self.matches(Token::Nil) {
-            Term::Nil
-        } else {
-            return Err(ParseError::Expected("term".into()));
-        })
-    }
-    pub fn inline_function(&mut self) -> MaybeParse<Function> {
+    pub fn inline_function(&mut self) -> MaybeParsed<Function> {
         let mut bar = false;
         let opening = self.matches(Token::Fn) || {
             bar = true;
@@ -385,15 +473,15 @@ impl Tokens {
             if !bar {
                 self.require_token(Token::OpenParen)?;
             }
-            let mut args = Vec::new();
-            while let Some(ident) = self.ident()? {
-                args.push(ident);
+            let mut args = Args::default();
+            while let Some(ident) = String::try_parse(self)? {
+                args.idents.push(ident);
                 if !self.matches(Token::Comma) {
                     break;
                 }
             }
             self.require_token(if bar { Token::Bar } else { Token::CloseParen })?;
-            let expr = self.expression()?;
+            let expr = Expression::parse(self)?;
             Some(Function {
                 args,
                 body: expr.into(),
@@ -404,19 +492,12 @@ impl Tokens {
             None
         })
     }
-    pub fn _list_or_table(&mut self) -> MaybeParse<Value> {
-        let _start = if let Some(open_curly) = self.take_if(Token::OpenCurly) {
-            open_curly
-        } else {
-            return Ok(None);
-        };
-        todo!()
-    }
 }
 
-pub fn parse<R>(input: R) -> Result<Command, ParseError>
-where
-    R: Read,
-{
-    Tokens::new(input)?.command()
+pub trait Parse: Sized {
+    const EXPECTATION: &'static str;
+    fn try_parse(tokens: &mut Tokens) -> MaybeParsed<Self>;
+    fn parse(tokens: &mut Tokens) -> Parsed<Self> {
+        tokens.require(Self::try_parse, Self::EXPECTATION)
+    }
 }

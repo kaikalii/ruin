@@ -1,14 +1,15 @@
-use std::{ops::Index, sync::Arc};
+use std::{collections::HashSet, ops::Index, sync::Arc};
 
 use colored::Colorize;
 use indexmap::IndexMap;
 
-use crate::{compile::*, value::*};
+use crate::{ast::*, compile::*, value::*};
 
 #[derive(Debug, Clone, Default)]
 pub struct Codebase {
     pub parent: Option<Arc<Self>>,
     pub vals: IndexMap<String, Value>,
+    pub declared_functions: HashSet<String>,
 }
 
 impl Codebase {
@@ -38,6 +39,10 @@ impl Codebase {
         // Insert
         self.vals.remove(&ident);
         self.vals.insert(ident, val.into());
+    }
+    pub fn insert_function_decl(&mut self, decl: FunctionDecl) {
+        self.declared_functions.insert(decl.ident.clone());
+        self.insert(decl.ident, decl.function);
     }
     pub fn print(&self, n: usize) {
         println!();
@@ -87,6 +92,13 @@ impl Codebase {
         }
     }
     fn eval_ident(self: &mut Arc<Self>, ident: &str) {
+        if let Value::Function(function) = &self.vals[ident] {
+            if let FunctionBody::Expr { instrs, .. } = &function.body {
+                if instrs.lock().unwrap().is_none() {
+                    let _ = compile_function(function, &mut CompileState::new(self.clone()), None);
+                }
+            }
+        }
         let evald = eval_ident(self, ident, false);
         if let Some(val) = self.as_mut().vals.get_mut(ident) {
             if let Value::Expression { val, .. } = val {
