@@ -398,10 +398,10 @@ pub trait Evalable {
 
 impl Evalable for ExprOr {
     fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
-        self.left.data.compile(state, instrs)?;
+        self.left.compile(state, instrs)?;
         for right in &self.rights {
             let mut delayed = Instrs::new();
-            right.expr.data.compile(state, &mut delayed)?;
+            right.expr.compile(state, &mut delayed)?;
             instrs.push(delayed.into());
             instrs.push(Instr::Or);
         }
@@ -411,10 +411,10 @@ impl Evalable for ExprOr {
 
 impl Evalable for ExprAnd {
     fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
-        self.left.data.compile(state, instrs)?;
+        self.left.compile(state, instrs)?;
         for right in &self.rights {
             let mut delayed = Instrs::new();
-            right.expr.data.compile(state, &mut delayed)?;
+            right.expr.compile(state, &mut delayed)?;
             instrs.push(delayed.into());
             instrs.push(Instr::And);
         }
@@ -424,10 +424,10 @@ impl Evalable for ExprAnd {
 
 impl Evalable for ExprCmp {
     fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
-        self.left.data.compile(state, instrs)?;
+        self.left.compile(state, instrs)?;
         for right in &self.rights {
-            right.expr.data.compile(state, instrs)?;
-            instrs.push(Instr::Cmp(right.op.data));
+            right.expr.compile(state, instrs)?;
+            instrs.push(Instr::Cmp(right.op));
         }
         Ok(())
     }
@@ -435,10 +435,10 @@ impl Evalable for ExprCmp {
 
 impl Evalable for ExprAS {
     fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
-        self.left.data.compile(state, instrs)?;
+        self.left.compile(state, instrs)?;
         for right in &self.rights {
-            right.expr.data.compile(state, instrs)?;
-            instrs.push(Instr::AS(right.op.data));
+            right.expr.compile(state, instrs)?;
+            instrs.push(Instr::AS(right.op));
         }
         Ok(())
     }
@@ -446,10 +446,10 @@ impl Evalable for ExprAS {
 
 impl Evalable for ExprMDR {
     fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
-        self.left.data.compile(state, instrs)?;
+        self.left.compile(state, instrs)?;
         for right in &self.rights {
-            right.expr.data.compile(state, instrs)?;
-            instrs.push(Instr::MDR(right.op.data));
+            right.expr.compile(state, instrs)?;
+            instrs.push(Instr::MDR(right.op));
         }
         Ok(())
     }

@@ -150,10 +150,13 @@ thread_local! {
     static COMMAND_PATTERN: Box<dyn Pattern<Token = Token>> = Box::new(command_pattern());
 }
 
-pub fn lex<R>(input: R) -> LexResult<Vec<Sp<Token>>>
+pub fn lex<R>(input: R) -> LexResult<Vec<Token>>
 where
     R: Read,
 {
-    COMMAND_PATTERN
-        .with(move |pattern| Chars::new(input).tokenize(pattern, &char::is_whitespace.any()))
+    COMMAND_PATTERN.with(move |pattern| {
+        Chars::new(input)
+            .tokenize(pattern, &char::is_whitespace.any())
+            .map(|tokens| tokens.into_iter().map(|sp| sp.data).collect())
+    })
 }

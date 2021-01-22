@@ -3,7 +3,7 @@ use std::{fmt::Display as StdDisplay, io::Read};
 use colored::Colorize;
 use derive_more::Display;
 use itertools::Itertools;
-use tokenate::{LexError, LexResult, Sp};
+use tokenate::{LexError, LexResult};
 
 use crate::{lexer::*, num::Num, value::*};
 
@@ -20,8 +20,8 @@ impl From<LexError> for ParseError {
     }
 }
 
-pub type Parse<T> = Result<Sp<T>, ParseError>;
-pub type MaybeParse<T> = Result<Option<Sp<T>>, ParseError>;
+pub type Parse<T> = Result<T, ParseError>;
+pub type MaybeParse<T> = Result<Option<T>, ParseError>;
 
 trait TokenPattern: StdDisplay {
     fn matches(&self, token: &Token) -> bool;
@@ -59,8 +59,8 @@ pub enum Command {
 }
 
 struct Tokens {
-    iter: std::vec::IntoIter<Sp<Token>>,
-    history: Vec<Sp<Token>>,
+    iter: std::vec::IntoIter<Token>,
+    history: Vec<Token>,
     cursor: usize,
     // revert_trackers: usize,
 }
@@ -80,7 +80,7 @@ impl Tokens {
             // revert_trackers: 0,
         })
     }
-    pub fn take(&mut self) -> Option<Sp<Token>> {
+    pub fn take(&mut self) -> Option<Token> {
         let token = if self.cursor < self.history.len() {
             Some(&self.history[self.cursor])
         } else if let Some(token) = self.iter.next() {
@@ -97,20 +97,20 @@ impl Tokens {
         }
     }
     #[allow(dead_code)]
-    pub fn peek(&mut self) -> Option<&Sp<Token>> {
+    pub fn peek(&mut self) -> Option<&Token> {
         if self.cursor == self.history.len() {
             self.take()?;
             self.put_back();
         }
         self.history.get(self.cursor)
     }
-    pub fn take_as<F, T>(&mut self, f: F) -> Option<Sp<T>>
+    pub fn take_as<F, T>(&mut self, f: F) -> Option<T>
     where
         F: Fn(&Token) -> Option<T>,
     {
         if let Some(sp_token) = self.take() {
-            match f(&sp_token.data) {
-                Some(val) => Some(sp_token.span.sp(val)),
+            match f(&sp_token) {
+                Some(val) => Some(val),
                 None => {
                     self.put_back();
                     None
@@ -135,12 +135,12 @@ impl Tokens {
         //     self.history.clear();
         // }
     }
-    pub fn take_if<P>(&mut self, pattern: P) -> Option<Sp<Token>>
+    pub fn take_if<P>(&mut self, pattern: P) -> Option<Token>
     where
         P: TokenPattern,
     {
         if let Some(token) = self.take() {
-            if pattern.matches(&token.data) {
+            if pattern.matches(&token) {
                 Some(token)
             } else {
                 self.put_back();
@@ -150,11 +150,11 @@ impl Tokens {
             None
         }
     }
-    pub fn matches_as<P, T>(&mut self, pattern: P, val: T) -> Option<Sp<T>>
+    pub fn matches_as<P, T>(&mut self, pattern: P, val: T) -> Option<T>
     where
         P: TokenPattern,
     {
-        self.take_if(pattern).map(|token| token.span.sp(val))
+        self.take_if(pattern).map(|_| val)
     }
     pub fn matches<P>(&mut self, pattern: P) -> bool
     where
@@ -222,11 +222,11 @@ impl Tokens {
     }
     pub fn command(&mut self) -> Result<Command, ParseError> {
         if let Some(ass) = self.assigment()? {
-            Ok(Command::Assignment(ass.data))
+            Ok(Command::Assignment(ass))
         } else if self.matches(Token::Slash) {
             Ok(Command::Command)
         } else {
-            self.expression().map(|expr| Command::Eval(expr.data))
+            self.expression().map(Command::Eval)
         }
     }
     pub fn assigment(&mut self) -> MaybeParse<Assignment> {
@@ -241,8 +241,7 @@ impl Tokens {
             return Ok(None);
         }
         let expr = self.expression()?;
-        let ass = ident.join(expr, |ident, expr| Assignment { ident, expr });
-        Ok(Some(ass))
+        Ok(Some(Assignment { ident, expr }))
     }
     pub fn expression(&mut self) -> Parse<Expression> {
         self.expr_or()
@@ -257,12 +256,7 @@ impl Tokens {
         {
             rights.push(right);
         }
-        let span = if let Some(right) = rights.last() {
-            left.span | right.op.span
-        } else {
-            left.span
-        };
-        Ok(span.sp(ExprOr::new(left, rights)))
+        Ok(ExprOr::new(left, rights))
     }
     pub fn expr_and(&mut self) -> Parse<ExprAnd> {
         let left = self.expr_cmp()?;
@@ -274,12 +268,7 @@ impl Tokens {
         {
             rights.push(right);
         }
-        let span = if let Some(right) = rights.last() {
-            left.span | right.op.span
-        } else {
-            left.span
-        };
-        Ok(span.sp(ExprAnd::new(left, rights)))
+        Ok(ExprAnd::new(left, rights))
     }
     pub fn expr_cmp(&mut self) -> Parse<ExprCmp> {
         let left = self.expr_as()?;
@@ -291,12 +280,7 @@ impl Tokens {
         {
             rights.push(right);
         }
-        let span = if let Some(right) = rights.last() {
-            left.span | right.op.span
-        } else {
-            left.span
-        };
-        Ok(span.sp(ExprCmp::new(left, rights)))
+        Ok(ExprCmp::new(left, rights))
     }
     pub fn expr_as(&mut self) -> Parse<ExprAS> {
         let left = self.expr_mdr()?;
@@ -309,12 +293,7 @@ impl Tokens {
         {
             rights.push(right);
         }
-        let span = if let Some(right) = rights.last() {
-            left.span | right.op.span
-        } else {
-            left.span
-        };
-        Ok(span.sp(ExprAS::new(left, rights)))
+        Ok(ExprAS::new(left, rights))
     }
     pub fn expr_mdr(&mut self) -> Parse<ExprMDR> {
         let left = self.expr_not()?;
@@ -328,86 +307,58 @@ impl Tokens {
         {
             rights.push(right);
         }
-        let span = if let Some(right) = rights.last() {
-            left.span | right.op.span
-        } else {
-            left.span
-        };
-        Ok(span.sp(ExprMDR::new(left, rights)))
+        Ok(ExprMDR::new(left, rights))
     }
     #[allow(dead_code)]
     fn dbg(&self, line: u32) {
         print!("{}: ", line);
         for token in &self.history {
-            print!("{} ", token.data);
+            print!("{} ", token);
         }
         println!("{}", self.cursor);
     }
     pub fn expr_not(&mut self) -> Parse<ExprNot> {
         let mut count = 0;
-        let mut start = None;
-        while let Some(not) = self.take_if(Token::Not) {
-            start = Some(not.span.start);
+        while self.matches(Token::Not) {
             count += 1;
         }
         let expr = self.expr_call()?;
-        Ok(start
-            .unwrap_or(expr.span.start)
-            .to(expr.span.end)
-            .sp(ExprNot {
-                op: OpNot,
-                count,
-                expr: expr.data,
-            }))
+        Ok(ExprNot {
+            op: OpNot,
+            count,
+            expr,
+        })
     }
     pub fn expr_call(&mut self) -> Parse<ExprCall> {
         let first = self.term()?;
-        let mut end = first.span.end;
         let mut method_call_syntax = false;
         let mut calls = Vec::new();
         while self.matches(Token::Colon) {
             method_call_syntax = true;
-            let term = self.term()?.data;
+            let term = self.term()?;
             let args = self.require(Self::args, "arguments")?;
-            end = args.span.end;
-            calls.push(Call {
-                term,
-                args: args.data,
-            });
+            calls.push(Call { term, args });
         }
         if method_call_syntax {
-            return Ok(first.span.start.to(end).sp(ExprCall::Method {
-                first: first.data,
-                calls,
-            }));
+            return Ok(ExprCall::Method { first, calls });
         }
         let args = self.args()?;
-        if let Some(args) = &args {
-            end = args.span.end;
-        }
-        Ok(first.span.start.to(end).sp(ExprCall::Regular {
-            term: first.data,
-            args: args.map(|args| args.data),
-        }))
+        Ok(ExprCall::Regular { term: first, args })
     }
     pub fn args(&mut self) -> MaybeParse<Vec<Expression>> {
-        Ok(if let Some(open_paren) = self.take_if(Token::OpenParen) {
-            let start = open_paren.span.start;
+        Ok(if self.matches(Token::OpenParen) {
             let mut args = Vec::new();
-            let end;
             loop {
-                if let Some(close_paren) = self.take_if(Token::CloseParen) {
-                    end = close_paren.span.end;
+                if self.matches(Token::CloseParen) {
                     break;
                 }
                 let expr = self.expression()?;
-                args.push(expr.data);
+                args.push(expr);
                 if !self.matches(Token::Comma) {
-                    end = self.require_token(Token::CloseParen)?.span.end;
                     break;
                 }
             }
-            Some(start.to(end).sp(args))
+            Some(args)
         } else {
             None
         })
@@ -416,48 +367,48 @@ impl Tokens {
         Ok(if self.matches(Token::OpenParen) {
             let expr = self.expression()?;
             self.require_token(Token::CloseParen)?;
-            expr.map(Box::new).map(Term::Expr)
+            Term::Expr(expr.into())
         } else if let Some(num) = self.num()? {
-            num.map(Term::Num)
+            Term::Num(num)
         } else if let Some(ident) = self.ident()? {
-            ident.map(Term::Ident)
+            Term::Ident(ident)
         } else if let Some(s) = self.string_literal()? {
-            s.map(Term::String)
+            Term::String(s)
         } else if let Some(b) = self.boolean()? {
-            b.map(Term::Bool)
+            Term::Bool(b)
         } else if let Some(function) = self.inline_function()? {
-            function.map(Box::new).map(Term::Function)
-        } else if let Some(nil) = self.take_if(Token::Nil) {
-            nil.span.sp(Term::Nil)
+            Term::Function(function.into())
+        } else if self.matches(Token::Nil) {
+            Term::Nil
         } else {
             return Err(ParseError::Expected("term".into()));
         })
     }
     pub fn inline_function(&mut self) -> MaybeParse<Function> {
         let mut bar = false;
-        let start = self.take_if(Token::Fn).or_else(|| {
+        let opening = self.matches(Token::Fn) || {
             bar = true;
-            self.take_if(Token::Bar)
-        });
-        Ok(if let Some(start) = start {
+            self.matches(Token::Bar)
+        };
+        Ok(if opening {
             if !bar {
                 self.require_token(Token::OpenParen)?;
             }
             let mut args = Vec::new();
             while let Some(ident) = self.ident()? {
-                args.push(ident.data);
+                args.push(ident);
                 if !self.matches(Token::Comma) {
                     break;
                 }
             }
             self.require_token(if bar { Token::Bar } else { Token::CloseParen })?;
             let expr = self.expression()?;
-            Some((start.span | expr.span).sp(Function {
+            Some(Function {
                 args,
-                body: expr.data.into(),
+                body: expr.into(),
                 env: Default::default(),
                 bar,
-            }))
+            })
         } else {
             None
         })
@@ -483,16 +434,16 @@ pub struct Assignment {
 #[display(bound = "O: StdDisplay, T: StdDisplay")]
 #[display(
     fmt = "{}{}",
-    "left.data",
-    r#"rights.iter().map(|r| { format!(" {} {}", r.op.data, r.expr.data) }).collect::<String>()"#
+    "left",
+    r#"rights.iter().map(|r| { format!(" {} {}", r.op, r.expr) }).collect::<String>()"#
 )]
 pub struct BinExpr<O, T> {
-    pub left: Box<Sp<T>>,
+    pub left: Box<T>,
     pub rights: Vec<Right<O, T>>,
 }
 
 impl<O, T> BinExpr<O, T> {
-    pub fn new(left: Sp<T>, rights: Vec<Right<O, T>>) -> Self {
+    pub fn new(left: T, rights: Vec<Right<O, T>>) -> Self {
         BinExpr {
             left: Box::new(left),
             rights,
@@ -511,20 +462,20 @@ impl<O, T> Node for BinExpr<O, T>
 where
     T: Node,
 {
-    type Child = Sp<T>;
+    type Child = T;
     fn contains_ident(&self, ident: &str) -> bool {
-        self.left.data.contains_ident(ident)
+        self.left.contains_ident(ident)
             || self
                 .rights
                 .iter()
-                .any(|right| right.expr.data.contains_ident(ident))
+                .any(|right| right.expr.contains_ident(ident))
     }
     fn terms(&self) -> usize {
-        self.left.data.terms()
+        self.left.terms()
             + self
                 .rights
                 .iter()
-                .map(|right| right.expr.data.terms())
+                .map(|right| right.expr.terms())
                 .sum::<usize>()
     }
     fn wrapping(child: Self::Child) -> Self {
@@ -534,12 +485,12 @@ where
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Right<O, T> {
-    pub op: Sp<O>,
-    pub expr: Sp<T>,
+    pub op: O,
+    pub expr: T,
 }
 
 impl<O, T> Right<O, T> {
-    fn new(op: Sp<O>, expr: Sp<T>) -> Self {
+    fn new(op: O, expr: T) -> Self {
         Right { op, expr }
     }
 }
