@@ -87,7 +87,7 @@ impl Codebase {
         }
     }
     fn eval_ident(self: &mut Arc<Self>, ident: &str) {
-        let evald = eval_ident(self, ident);
+        let evald = eval_ident(self, ident, false);
         if let Some(val) = self.as_mut().vals.get_mut(ident) {
             if let Value::Expression { val, .. } = val {
                 *val = Some(evald.into());

@@ -91,13 +91,13 @@ where
     }
 }
 
-pub fn eval_ident(cb: &Arc<Codebase>, ident: &str) -> Value {
+pub fn eval_ident(cb: &Arc<Codebase>, ident: &str, seq: bool) -> Value {
     let mut instrs = Instrs::new();
     let mut state = CompileState::new(cb.clone(), Default::default());
     if let Err(e) = compile_ident(ident, &mut state, &mut instrs) {
         return e.into();
     }
-    Stack::new().run(&instrs)
+    Stack::new().seq(seq).run(&instrs)
 }
 
 pub fn eval_function(function: Value, args: Vec<Value>) -> Value {
@@ -175,7 +175,7 @@ impl Default for Stack {
         Stack {
             vals: Vec::new(),
             args: ArgValStack::new(),
-            free_seq: true,
+            free_seq: false,
         }
     }
 }
@@ -183,6 +183,12 @@ impl Default for Stack {
 impl Stack {
     pub fn new() -> Self {
         Default::default()
+    }
+    pub fn seq(self, seq: bool) -> Self {
+        Stack {
+            free_seq: seq,
+            ..self
+        }
     }
     #[track_caller]
     pub fn pop(&mut self) -> EvalResult<Value> {
@@ -361,7 +367,7 @@ pub fn compile_ident(ident: &str, state: &mut CompileState, instrs: &mut Instrs)
                         instrs.push((*val).into());
                     } else {
                         state.callers.push(ident.into());
-                        let val = expr.eval(state).ok()?;
+                        let val = expr.eval(state, false).ok()?;
                         state.callers.pop();
                         instrs.push(val.into());
                     }
@@ -378,11 +384,11 @@ pub fn compile_ident(ident: &str, state: &mut CompileState, instrs: &mut Instrs)
 
 pub trait Evalable {
     fn compile(&self, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult;
-    fn eval(&self, state: &mut CompileState) -> Value {
+    fn eval(&self, state: &mut CompileState, seq: bool) -> Value {
         let mut instrs = Instrs::new();
         match self.compile(state, &mut instrs) {
             Ok(()) => {
-                let mut stack = Stack::new();
+                let mut stack = Stack::new().seq(seq);
                 if let Err(e) = stack.execute(&instrs) {
                     return e.into();
                 }

@@ -67,7 +67,7 @@ fn handle_input(input: &str, cb: &mut Arc<Codebase>, eval: bool) {
             }
             Command::Eval(expr) => {
                 println!();
-                let val = expr.eval(&mut CompileState::new(cb.clone(), Default::default()));
+                let val = expr.eval(&mut CompileState::new(cb.clone(), Default::default()), true);
                 println!("{}", val);
                 println!();
             }
@@ -103,7 +103,7 @@ fn load(cb: &mut Arc<Codebase>, path: Option<String>, eval: bool) -> io::Result<
 fn run(cb: &mut Arc<Codebase>, path: Option<String>) {
     let path = path.unwrap_or_else(|| "main".into());
     println!();
-    let function = eval_ident(cb, &path);
+    let function = eval_ident(cb, &path, true);
     if let Err(e) = eval_function(function, vec![Value::Seq]).ok() {
         println!("{}", e);
     }
