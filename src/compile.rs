@@ -52,15 +52,15 @@ fn stack_arg(arg_stack: &ArgNameStack, ident: &str) -> EvalResult<ArgIndex> {
 }
 
 #[derive(Clone)]
-pub struct EvalState {
+pub struct CompileState {
     pub cb: Arc<Codebase>,
     pub callers: Callers,
     pub args: ArgNameStack,
 }
 
-impl EvalState {
+impl CompileState {
     pub fn new(cb: Arc<Codebase>, callers: Callers) -> Self {
-        EvalState {
+        CompileState {
             cb,
             callers,
             args: ArgNameStack::default(),
@@ -68,7 +68,7 @@ impl EvalState {
     }
 }
 
-impl<P> Index<P> for EvalState
+impl<P> Index<P> for CompileState
 where
     P: Into<String>,
 {
@@ -80,7 +80,7 @@ where
 
 pub fn eval_ident(cb: &Arc<Codebase>, ident: &str) -> Value {
     let mut instrs = Instrs::new();
-    let state = EvalState::new(cb.clone(), Default::default());
+    let state = CompileState::new(cb.clone(), Default::default());
     let res = compile_ident(ident, &state, &mut instrs);
     if let Err(e) = res {
         return e.into();
@@ -328,7 +328,7 @@ impl Instr {
     }
 }
 
-fn compile_ident(ident: &str, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+fn compile_ident(ident: &str, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
     match stack_arg(&state.args, ident) {
         Ok(index) => {
             instrs.push(Instr::Arg(index));
@@ -343,7 +343,7 @@ fn compile_ident(ident: &str, state: &EvalState, instrs: &mut Instrs) -> EvalRes
                         instrs.push((*val).into());
                     } else {
                         instrs.push(
-                            expr.eval(&EvalState::new(
+                            expr.eval(&CompileState::new(
                                 state.cb.clone(),
                                 state.callers.push_back(ident.into()),
                             ))
@@ -362,8 +362,8 @@ fn compile_ident(ident: &str, state: &EvalState, instrs: &mut Instrs) -> EvalRes
 }
 
 pub trait Evalable {
-    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult;
-    fn eval(&self, state: &EvalState) -> Value {
+    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult;
+    fn eval(&self, state: &CompileState) -> Value {
         let mut instrs = Instrs::new();
         match self.compile(state, &mut instrs) {
             Ok(()) => {
@@ -379,7 +379,7 @@ pub trait Evalable {
 }
 
 impl Evalable for ExprOr {
-    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
         self.left.data.compile(state, instrs)?;
         for right in &self.rights {
             let mut delayed = Instrs::new();
@@ -392,7 +392,7 @@ impl Evalable for ExprOr {
 }
 
 impl Evalable for ExprAnd {
-    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
         self.left.data.compile(state, instrs)?;
         for right in &self.rights {
             let mut delayed = Instrs::new();
@@ -405,7 +405,7 @@ impl Evalable for ExprAnd {
 }
 
 impl Evalable for ExprCmp {
-    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
         self.left.data.compile(state, instrs)?;
         for right in &self.rights {
             right.expr.data.compile(state, instrs)?;
@@ -416,7 +416,7 @@ impl Evalable for ExprCmp {
 }
 
 impl Evalable for ExprAS {
-    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
         self.left.data.compile(state, instrs)?;
         for right in &self.rights {
             right.expr.data.compile(state, instrs)?;
@@ -427,7 +427,7 @@ impl Evalable for ExprAS {
 }
 
 impl Evalable for ExprMDR {
-    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
         self.left.data.compile(state, instrs)?;
         for right in &self.rights {
             right.expr.data.compile(state, instrs)?;
@@ -438,7 +438,7 @@ impl Evalable for ExprMDR {
 }
 
 impl Evalable for ExprCall {
-    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
         match self {
             ExprCall::Regular { term, args } => {
                 let mut arg_count = None;
@@ -469,7 +469,7 @@ impl Evalable for ExprCall {
 }
 
 impl Evalable for ExprNot {
-    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
         self.expr.compile(state, instrs)?;
         for _ in 0..self.count {
             instrs.push(Instr::Not);
@@ -479,7 +479,7 @@ impl Evalable for ExprNot {
 }
 
 impl Evalable for Term {
-    fn compile(&self, state: &EvalState, instrs: &mut Instrs) -> EvalResult {
+    fn compile(&self, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
         match self {
             Term::Expr(expr) => expr.compile(state, instrs)?,
             Term::Bool(b) => instrs.push(Value::Bool(*b).into()),
@@ -488,22 +488,29 @@ impl Evalable for Term {
             Term::Ident(ident) => compile_ident(ident, state, instrs)?,
             Term::String(s) => instrs.push(Value::String(s.clone()).into()),
             Term::Function(function) => {
+                // Get the body and compiled instructions
                 let (body, function_instrs) =
                     if let FunctionBody::Expr { expr, instrs } = &function.body {
                         (expr, instrs)
                     } else {
                         panic!("Built-in function in term")
                     };
+                // Create a codebase to be used for body compilation
                 let mut function_cb = Codebase::from_parent(state.cb.clone());
+                // Insert values from the function's environment into the new codebase
                 for (ident, val) in &function.env {
                     function_cb.as_mut().insert(ident.into(), val.clone())
                 }
-                let mut function_state = EvalState::new(function_cb, state.callers.clone());
+                // Create a new state for compiling the function
+                let mut function_state = CompileState::new(function_cb, state.callers.clone());
+                // Add the function's args to the new state's arg stack
                 function_state.args = function_state.args.push_back(function.args.clone());
+                // Compile the function
                 let mut function_instrs = function_instrs.lock().unwrap();
                 let function_instrs = function_instrs.get_or_insert_with(Vec::new);
                 function_instrs.clear();
                 body.compile(&function_state, function_instrs)?;
+                // Add the function as a push instruction
                 instrs.push(Value::Function((*function).clone().into()).into());
             }
         }
