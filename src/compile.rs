@@ -1,5 +1,6 @@
 use std::{ops::Index, sync::Arc};
 
+use colored::Colorize;
 use derive_more::Display;
 use rpds::VectorSync;
 
@@ -7,16 +8,27 @@ use crate::{codebase::*, parse::*, value::*};
 
 #[derive(Debug, Display, Clone)]
 pub enum EvalError {
-    #[display(fmt = "Attempted to perform arithmetic on {} value", _0)]
+    #[display(
+        fmt = "Attempted to perform arithmetic on {} value",
+        "_0.to_string().underline()"
+    )]
     Math(Type),
     #[display(fmt = "Recursive value detected: {}", _0)]
     RecursiveValue(String),
-    #[display(fmt = "Attempted to call {}, a {} value", expr, ty)]
+    #[display(
+        fmt = "Attempted to call {}, a {} value",
+        expr,
+        "ty.to_string().underline()"
+    )]
     CallNonFunction {
         expr: String,
         ty: Type,
     },
-    #[display(fmt = "Cannot assign member of {}, a {} value", expr, ty)]
+    #[display(
+        fmt = "Cannot assign member of {}, a {} value",
+        expr,
+        "ty.to_string().underline()"
+    )]
     _CantAssign {
         expr: String,
         ty: Type,
@@ -328,7 +340,7 @@ impl Instr {
     }
 }
 
-fn compile_ident(ident: &str, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
+pub fn compile_ident(ident: &str, state: &CompileState, instrs: &mut Instrs) -> EvalResult {
     match stack_arg(&state.args, ident) {
         Ok(index) => {
             instrs.push(Instr::Arg(index));

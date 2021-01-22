@@ -23,7 +23,7 @@ pub enum Value {
     Num(Num),
     #[display(fmt = "{}", "_0.to_string().blue()")]
     Bool(bool),
-    #[display(fmt = "{}", "_0.green()")]
+    #[display(fmt = "{}", r#"format!("{:?}", _0).green()"#)]
     String(String),
     #[display(fmt = "{}", "_0.red()")]
     Error(String),
