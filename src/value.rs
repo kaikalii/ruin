@@ -193,7 +193,7 @@ pub enum FunctionBody {
     #[display(fmt = "{}", expr)]
     Expr {
         expr: Expression,
-        instrs: Arc<Mutex<Option<Instrs>>>,
+        instrs: Arc<Mutex<Instrs>>,
     },
     #[display(fmt = "built-in")]
     Builtin(BuiltinFunction),
@@ -203,7 +203,7 @@ impl From<Expression> for FunctionBody {
     fn from(expr: Expression) -> Self {
         FunctionBody::Expr {
             expr,
-            instrs: Arc::new(Mutex::new(None)),
+            instrs: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }

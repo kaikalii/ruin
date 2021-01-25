@@ -36,6 +36,7 @@ impl Codebase {
     {
         // Unassign results that depend on the ident
         self.unassign_results(&ident);
+        self.declared_functions.remove(&ident);
         // Insert
         self.vals.remove(&ident);
         self.vals.insert(ident, val.into());
@@ -94,7 +95,7 @@ impl Codebase {
     fn eval_ident(self: &mut Arc<Self>, ident: &str) {
         if let Value::Function(function) = &self.vals[ident] {
             if let FunctionBody::Expr { instrs, .. } = &function.body {
-                if instrs.lock().unwrap().is_none() {
+                if instrs.lock().unwrap().is_empty() {
                     let _ = compile_function(function, &mut CompileState::new(self.clone()), None);
                 }
             }

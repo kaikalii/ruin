@@ -30,6 +30,8 @@ pub fn add_std_lib(cb: &mut Codebase) {
     );
     cb.insert(
         "let".into(),
-        Function::new_builtin(&["val", "function"], |stack| Instr::Call(1).execute(stack)),
+        Function::new_builtin(&["val", "function"], |stack| {
+            execute(&[Instr::Call(1)], stack)
+        }),
     );
 }

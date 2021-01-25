@@ -1,4 +1,7 @@
-use std::{ops::Index, sync::Arc};
+use std::{
+    ops::Index,
+    sync::{Arc, Mutex, MutexGuard},
+};
 
 use colored::Colorize;
 use derive_more::Display;
@@ -106,8 +109,7 @@ pub fn eval_function(function: Value, args: Vec<Value>) -> Value {
     for val in args.into_iter().chain(Some(function)) {
         stack.push(val);
     }
-    Instr::Call(len)
-        .execute(&mut stack)
+    execute(&[Instr::Call(len)], &mut stack)
         .and_then(|_| stack.pop())
         .unwrap_or_else(Into::into)
 }
@@ -136,18 +138,29 @@ impl Pushed {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Display, Clone)]
 pub enum Instr {
+    #[display(fmt = "push {}", _0)]
     Push(Value),
+    #[display(
+        fmt = "Delayed({})",
+        r#"_0.iter().map(|i| format!("{}, ", i)).collect::<String>()"#
+    )]
     Delayed(Instrs),
+    #[display(fmt = "Arg({}, {})", "_0.0", "_0.1")]
     Arg(ArgIndex),
     Or,
     And,
+    #[display(fmt = "op {}", _0)]
     Cmp(OpCmp),
+    #[display(fmt = "op {}", _0)]
     AS(OpAS),
+    #[display(fmt = "op {}", _0)]
     MDR(OpMDR),
     Not,
+    #[display(fmt = "call with {} arg(s)", _0)]
     Call(usize),
+    PopArgs,
 }
 
 impl From<Value> for Instr {
@@ -230,127 +243,166 @@ impl Stack {
     }
     pub fn arg(&self, (i, j): ArgIndex) -> Value {
         self.args
-            .get(i)
+            .get(self.args.len() - 1 - i)
             .and_then(|args| args.get(j))
             .cloned()
             .unwrap_or(Value::Nil)
     }
-    pub fn execute(&mut self, instrs: &[Instr]) -> EvalResult {
-        for instr in instrs {
-            instr.execute(self)?;
-        }
-        Ok(())
-    }
     pub fn run(&mut self, instrs: &[Instr]) -> Value {
-        if let Err(e) = self.execute(instrs) {
+        if let Err(e) = execute(instrs, self) {
             return e.into();
         }
         self.pop().unwrap_or_else(Into::into)
     }
 }
 
-impl Instr {
-    pub fn execute(&self, stack: &mut Stack) -> EvalResult {
-        println!("{:?}\n", self);
+enum InstrSource<'a> {
+    Borrowed(&'a [Instr]),
+    Owned(Vec<Instr>),
+    Shared(Arc<Mutex<Vec<Instr>>>),
+}
+
+impl<'a> InstrSource<'a> {
+    fn borrow(&self) -> InstrSourceRef {
         match self {
-            Instr::Push(val) => stack.push(val.clone()),
-            Instr::Delayed(instrs) => stack.push_delayed(instrs.clone()),
-            Instr::Arg(index) => stack.push(stack.arg(*index)),
-            Instr::Or => {
-                let right = stack.pop_delayed()?;
-                let left = stack.pop()?;
-                if left.is_truth() {
-                    stack.push(left);
-                } else {
-                    stack.execute(&right)?;
+            InstrSource::Borrowed(slice) => InstrSourceRef::Borrowed(*slice),
+            InstrSource::Owned(vec) => InstrSourceRef::Borrowed(vec.as_ref()),
+            InstrSource::Shared(mutex) => InstrSourceRef::Shared(mutex.lock().unwrap()),
+        }
+    }
+}
+
+enum InstrSourceRef<'a> {
+    Borrowed(&'a [Instr]),
+    Shared(MutexGuard<'a, Vec<Instr>>),
+}
+
+impl<'a> AsRef<[Instr]> for InstrSourceRef<'a> {
+    fn as_ref(&self) -> &[Instr] {
+        match self {
+            InstrSourceRef::Borrowed(slice) => *slice,
+            InstrSourceRef::Shared(guard) => guard.as_ref(),
+        }
+    }
+}
+
+pub fn execute(instrs: &[Instr], stack: &mut Stack) -> EvalResult {
+    let mut call_stack: Vec<(InstrSource, usize)> = vec![(InstrSource::Borrowed(instrs), 0)];
+    while let Some((instrs, i)) = call_stack.last_mut() {
+        let source_ref = instrs.borrow();
+        if let Some(instr) = source_ref.as_ref().get(*i) {
+            *i += 1;
+            match instr {
+                Instr::Push(val) => stack.push(val.clone()),
+                Instr::Delayed(instrs) => stack.push_delayed(instrs.clone()),
+                Instr::Arg(index) => stack.push(stack.arg(*index)),
+                Instr::Or => {
+                    let right = stack.pop_delayed()?;
+                    let left = stack.pop()?;
+                    if left.is_truth() {
+                        stack.push(left);
+                    } else {
+                        drop(source_ref);
+                        call_stack.push((InstrSource::Owned(right), 0));
+                    }
                 }
-            }
-            Instr::And => {
-                let right = stack.pop_delayed()?;
-                let left = stack.pop()?;
-                if left.is_truth() {
-                    stack.execute(&right)?;
-                } else {
-                    stack.push(left);
+                Instr::And => {
+                    let right = stack.pop_delayed()?;
+                    let left = stack.pop()?;
+                    if left.is_truth() {
+                        drop(source_ref);
+                        call_stack.push((InstrSource::Owned(right), 0));
+                    } else {
+                        stack.push(left);
+                    }
                 }
-            }
-            Instr::Cmp(op) => {
-                let (left, right) = stack.pop2()?;
-                let val = match op {
-                    OpCmp::Is => Value::Bool(left == right),
-                    OpCmp::Isnt => Value::Bool(left != right),
-                    op => match (left, right) {
+                Instr::Cmp(op) => {
+                    let (left, right) = stack.pop2()?;
+                    let val = match op {
+                        OpCmp::Is => Value::Bool(left == right),
+                        OpCmp::Isnt => Value::Bool(left != right),
+                        op => match (left, right) {
+                            (Value::Error(e), _) | (_, Value::Error(e)) => Value::Error(e),
+                            (Value::Num(a), Value::Num(b)) => Value::Bool(match op {
+                                OpCmp::Less => a < b,
+                                OpCmp::Greater => a > b,
+                                OpCmp::LessOrEqual => a <= b,
+                                OpCmp::GreaterOrEqual => a >= b,
+                                _ => unreachable!(),
+                            }),
+                            (Value::Num(_), val) | (val, _) => {
+                                return Err(EvalError::Math(val.ty()))
+                            }
+                        },
+                    };
+                    stack.push(val);
+                }
+                Instr::AS(op) => {
+                    let (left, right) = stack.pop2()?;
+                    let val = match (left, right) {
                         (Value::Error(e), _) | (_, Value::Error(e)) => Value::Error(e),
-                        (Value::Num(a), Value::Num(b)) => Value::Bool(match op {
-                            OpCmp::Less => a < b,
-                            OpCmp::Greater => a > b,
-                            OpCmp::LessOrEqual => a <= b,
-                            OpCmp::GreaterOrEqual => a >= b,
-                            _ => unreachable!(),
+                        (Value::Num(a), Value::Num(b)) => Value::Num(match op {
+                            OpAS::Add => a + b,
+                            OpAS::Sub => a - b,
                         }),
                         (Value::Num(_), val) | (val, _) => return Err(EvalError::Math(val.ty())),
-                    },
-                };
-                stack.push(val);
-            }
-            Instr::AS(op) => {
-                let (left, right) = stack.pop2()?;
-                let val = match (left, right) {
-                    (Value::Error(e), _) | (_, Value::Error(e)) => Value::Error(e),
-                    (Value::Num(a), Value::Num(b)) => Value::Num(match op {
-                        OpAS::Add => a + b,
-                        OpAS::Sub => a - b,
-                    }),
-                    (Value::Num(_), val) | (val, _) => return Err(EvalError::Math(val.ty())),
-                };
-                stack.push(val);
-            }
-            Instr::MDR(op) => {
-                let (left, right) = stack.pop2()?;
-                let val = match (left, right) {
-                    (Value::Error(e), _) | (_, Value::Error(e)) => Value::Error(e),
-                    (Value::Num(a), Value::Num(b)) => Value::Num(match op {
-                        OpMDR::Mul => a * b,
-                        OpMDR::Div => a / b,
-                        OpMDR::Rem => a % b,
-                    }),
-                    (Value::Num(_), val) | (val, _) => return Err(EvalError::Math(val.ty())),
-                };
-                stack.push(val);
-            }
-            Instr::Not => {
-                let val = stack.pop()?;
-                stack.push(Value::Bool(!val.is_truth()));
-            }
-            Instr::Call(arg_count) => {
-                let fval = stack.pop()?;
-                let function = match fval {
-                    Value::Function(function) => function,
-                    Value::Error(e) => return Err(EvalError::Value(e)),
-                    val => {
-                        return Err(EvalError::CallNonFunction {
-                            expr: val.to_string(),
-                            ty: val.ty(),
-                        })
-                    }
-                };
-                match &function.body {
-                    FunctionBody::Builtin(f) => f(stack)?,
-                    FunctionBody::Expr { instrs, .. } => {
-                        let mut args = Vec::with_capacity(*arg_count);
-                        for _ in 0..*arg_count {
-                            args.push(stack.pop()?);
+                    };
+                    stack.push(val);
+                }
+                Instr::MDR(op) => {
+                    let (left, right) = stack.pop2()?;
+                    let val = match (left, right) {
+                        (Value::Error(e), _) | (_, Value::Error(e)) => Value::Error(e),
+                        (Value::Num(a), Value::Num(b)) => Value::Num(match op {
+                            OpMDR::Mul => a * b,
+                            OpMDR::Div => a / b,
+                            OpMDR::Rem => a % b,
+                        }),
+                        (Value::Num(_), val) | (val, _) => return Err(EvalError::Math(val.ty())),
+                    };
+                    stack.push(val);
+                }
+                Instr::Not => {
+                    let val = stack.pop()?;
+                    stack.push(Value::Bool(!val.is_truth()));
+                }
+                Instr::Call(arg_count) => {
+                    let fval = stack.pop()?;
+                    let function = match fval {
+                        Value::Function(function) => function,
+                        Value::Error(e) => return Err(EvalError::Value(e)),
+                        val => {
+                            return Err(EvalError::CallNonFunction {
+                                expr: val.to_string(),
+                                ty: val.ty(),
+                            })
                         }
-                        args.reverse();
-                        stack.args.push(args);
-                        stack.execute(instrs.lock().unwrap().as_ref().unwrap())?;
-                        stack.args.pop();
+                    };
+                    match &function.body {
+                        FunctionBody::Builtin(f) => f(stack)?,
+                        FunctionBody::Expr { instrs, .. } => {
+                            let mut args = Vec::with_capacity(*arg_count);
+                            for _ in 0..*arg_count {
+                                args.push(stack.pop()?);
+                            }
+                            args.reverse();
+                            stack.args.push(args);
+                            drop(source_ref);
+                            call_stack.push((InstrSource::Owned(vec![Instr::PopArgs]), 0));
+                            call_stack.push((InstrSource::Shared(instrs.clone()), 0));
+                        }
                     }
                 }
+                Instr::PopArgs => {
+                    stack.args.pop();
+                }
             }
+        } else {
+            drop(source_ref);
+            call_stack.pop();
         }
-        Ok(())
     }
+    Ok(())
 }
 
 pub fn compile_ident(ident: &str, state: &mut CompileState, instrs: &mut Instrs) -> EvalResult {
@@ -395,7 +447,7 @@ pub trait Evalable {
         match self.compile(state, &mut instrs) {
             Ok(()) => {
                 let mut stack = Stack::new().seq(seq);
-                if let Err(e) = stack.execute(&instrs) {
+                if let Err(e) = execute(&instrs, &mut stack) {
                     return e.into();
                 }
                 stack.pop().unwrap_or_else(Into::into)
@@ -541,10 +593,9 @@ pub fn compile_function(
     state.args.push(function.args.idents.clone());
     // Access the function's instructions
     let mut function_instrs = function_instrs.lock().unwrap();
-    let function_instrs = function_instrs.get_or_insert_with(Vec::new);
     function_instrs.clear();
     // Compile the function body
-    body.compile(state, function_instrs)?;
+    body.compile(state, function_instrs.as_mut())?;
     // Pop the function's args
     state.args.pop();
     // Add the function as a push instruction
